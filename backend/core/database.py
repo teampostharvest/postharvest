@@ -75,13 +75,17 @@ def session_url_for_migrations(url: str) -> str:
 # connection`` (measured: 20 concurrent queries -> 4 hard errors).
 _POOLER_SERVER_POOL = 15
 # Left for the host CLI and the one-off Alembic migration run.
-_POOLER_RESERVED = 3
-_POOLER_BUDGET = _POOLER_SERVER_POOL - _POOLER_RESERVED  # 12
+_POOLER_RESERVED = 2
+_POOLER_BUDGET = _POOLER_SERVER_POOL - _POOLER_RESERVED  # 13
 
 # Client-pool splits of that budget, as (pool_size, max_overflow).
-_POOL_TRANSACTION_INLINE = (8, 4)  # one process owns the whole budget
-_POOL_TRANSACTION_API_WITH_WORKER = (6, 2)  # API sheds scrape load to the worker
-_POOL_TRANSACTION_WORKER = (3, 1)  # 8 + 4 == 12, within budget
+_POOL_TRANSACTION_INLINE = (9, 4)  # one process owns the whole budget
+# The API keeps the larger share: it serves the dashboard's concurrent polls
+# (usage + active jobs + accounts) and every request used to need a connection
+# just to resolve the caller. The worker runs one scrape at a time and needs
+# only enough for its progress pings and post writes.
+_POOL_TRANSACTION_API_WITH_WORKER = (8, 2)  # 10
+_POOL_TRANSACTION_WORKER = (2, 1)  # 10 + 3 == 13, within budget
 
 
 def transaction_pool_sizes() -> tuple[int, int]:

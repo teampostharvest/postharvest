@@ -41,9 +41,24 @@ async def get_current_user(
     if not firebase_uid:
         raise AppError("Token payload missing user identity", status_code=401, code="invalid_token")
 
-    from backend.auth.user_service import get_or_create_user
+    from backend.auth.user_service import (
+        get_or_create_user,
+        serialize_user,
+        user_from_cache,
+    )
+    from backend.core import cache
 
-    user = get_or_create_user(db, firebase_uid, decoded)
+    # Resolving the caller is on every authenticated request's hot path. The
+    # identity cache removes the Postgres round-trip from the common case so a
+    # dashboard poll burst does not each hold a pooled connection. A miss (or a
+    # Redis outage) falls back to the DB, and the DB result is cached.
+    cached = cache.get_user(firebase_uid)
+    if cached is not None:
+        user = user_from_cache(cached)
+    else:
+        user = get_or_create_user(db, firebase_uid, decoded)
+        cache.set_user(firebase_uid, serialize_user(user))
+
     if not user.is_active:
         raise AppError("Account disabled", status_code=403, code="account_disabled")
     return user

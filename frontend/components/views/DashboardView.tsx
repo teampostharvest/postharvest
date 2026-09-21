@@ -25,13 +25,10 @@ export function DashboardView() {
   const [url, setUrl] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [activeCount, setActiveCount] = useState<number | null>(null);
   const [jobsError, setJobsError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    // Independent fetches: a failing active-count must never blank the
-    // recent list (or vice versa).
     api
       .listJobs({ page: 1, page_size: 10 })
       .then((res) => {
@@ -40,14 +37,6 @@ export function DashboardView() {
       .catch((error) => {
         if (!cancelled)
           setJobsError(error instanceof Error ? error.message : "Could not load recent jobs");
-      });
-    api
-      .listJobs({ status: "queued,running", page: 1, page_size: 1 })
-      .then((res) => {
-        if (!cancelled) setActiveCount(res.total);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveCount(null);
       });
     return () => {
       cancelled = true;
@@ -192,7 +181,8 @@ export function DashboardView() {
           >
             <div className="rounded-md border border-border bg-bg-subtle px-4 py-3">
               <p className="font-display text-xl leading-none tabular-nums text-ink">
-                {activeCount == null ? <Skeleton className="h-6 w-8" /> : activeCount}
+                {/* Same source as the sidebar quota panel — no second jobs query. */}
+                {usage == null ? <Skeleton className="h-6 w-8" /> : usage.jobs_running.used}
               </p>
               <p className="mt-1.5 text-xs font-medium text-ink-muted">Active runs</p>
             </div>

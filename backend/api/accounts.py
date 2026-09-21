@@ -46,9 +46,11 @@ from websockets.asyncio.client import ClientConnection, connect as _cdp_connect
 
 from backend.api.capture_viewer import VIEWER_HTML
 from backend.auth.dependencies import get_current_user
+from backend.core import cache
 from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.core.exceptions import AppError, NotFoundError
+from backend.core.logging import get_logger
 from backend.core.plans import personal_account_cap
 from backend.models.user import User
 from backend.schemas.accounts import (
@@ -73,6 +75,8 @@ from backend.scraper.browser_scraper import (
 )
 
 router = APIRouter(tags=["accounts"])
+
+logger = get_logger("api.accounts")
 
 
 # ---------------------------------------------------------------------------
@@ -218,12 +222,24 @@ def list_saved_accounts(
     Metadata only — cookie contents are never returned. A caller always sees
     the full ops pool (shared) but only their own ``me`` sessions.
     """
+    # The sidebar polls this endpoint, and each build costs a credentials-index
+    # read, a cookie-status disk read and a saved_accounts scan. Cache the
+    # per-user response; mutations below invalidate it.
+    cached = cache.get_accounts(current_user.id)
+    if cached is not None:
+        try:
+            return AccountsResponse.model_validate(cached)
+        except Exception:  # noqa: BLE001 - stale/corrupt entry, rebuild below
+            logger.debug("Discarding unreadable accounts cache entry", exc_info=True)
+
     ops_items = [_account_out(item, "ops") for item in account_metadata()]
     mine_items = [
         _account_out(item, "me", owner_id=current_user.id)
         for item in account_metadata(owner_id=current_user.id)
     ]
-    return AccountsResponse(ops=ops_items, mine=mine_items)
+    result = AccountsResponse(ops=ops_items, mine=mine_items)
+    cache.set_accounts(current_user.id, result.model_dump())
+    return result
 
 
 @router.post(
@@ -278,6 +294,7 @@ def add_personal_account(
             status_code=500,
             code="cookie_save_failed",
         )
+    cache.invalidate_accounts(current_user.id)  # list gained a session
     return _account_out(item, "me", owner_id=current_user.id)
 
 
@@ -488,4 +505,7 @@ def _delete_for_scope(scope: str, name: str, current_user: User, is_ops: bool) -
 
     if not removed:
         raise NotFoundError(f"Account '{name}' not found")
+    # The acting user's cached list must reflect the deletion immediately. Ops
+    # deletions are shared, but other users' entries expire within the TTL.
+    cache.invalidate_accounts(current_user.id)
     return Response(status_code=204)

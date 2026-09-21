@@ -53,8 +53,8 @@ def _safe(fn, *args, **kwargs):
         return None
 
 
-def get_json(key: str, client: "redis.Redis | None" = None) -> Any | None:
-    """Return the cached JSON value for ``key``, or None on miss/outage."""
+def _read(key: str, client: "redis.Redis | None") -> Any | None:
+    """Shared primitive: JSON-decode one entry, or None on miss/outage."""
     c = client if client is not None else job_state.get_client()
     if c is None:
         return None
@@ -67,13 +67,10 @@ def get_json(key: str, client: "redis.Redis | None" = None) -> Any | None:
         return None
 
 
-def set_json(
-    key: str,
-    value: Any,
-    ttl: int = DEFAULT_TTL_SECONDS,
-    client: "redis.Redis | None" = None,
+def _write(
+    key: str, value: Any, ttl: int, client: "redis.Redis | None"
 ) -> None:
-    """Cache ``value`` as JSON under ``key`` for ``ttl`` seconds."""
+    """Shared primitive: JSON-encode and store one entry for ``ttl`` seconds."""
     c = client if client is not None else job_state.get_client()
     if c is None:
         return
@@ -85,8 +82,8 @@ def set_json(
     _safe(c.set, _key(key), payload, ex=ttl)
 
 
-def delete(*keys: str, client: "redis.Redis | None" = None) -> None:
-    """Drop one or more cached entries (best-effort)."""
+def _drop(keys: tuple[str, ...], client: "redis.Redis | None") -> None:
+    """Shared primitive: best-effort deletion of one or more entries."""
     if not keys:
         return
     c = client if client is not None else job_state.get_client()
@@ -95,8 +92,103 @@ def delete(*keys: str, client: "redis.Redis | None" = None) -> None:
     _safe(c.delete, *(_key(k) for k in keys))
 
 
+def get_json(key: str, client: "redis.Redis | None" = None) -> Any | None:
+    """Return the cached JSON value for ``key``, or None on miss/outage."""
+    return _read(key, client)
+
+
+def set_json(
+    key: str,
+    value: Any,
+    ttl: int = DEFAULT_TTL_SECONDS,
+    client: "redis.Redis | None" = None,
+) -> None:
+    """Cache ``value`` as JSON under ``key`` for ``ttl`` seconds."""
+    _write(key, value, ttl, client)
+
+
+def delete(*keys: str, client: "redis.Redis | None" = None) -> None:
+    """Drop one or more cached entries (best-effort)."""
+    _drop(keys, client)
+
+
 def invalidate_usage(user_id: int | None, client: "redis.Redis | None" = None) -> None:
     """Drop the cached quota readout for a user (called on job state changes)."""
     if user_id is None:
         return
-    delete(f"usage:{user_id}", client=client)
+    _drop((f"usage:{user_id}",), client)
+
+
+# ---------------------------------------------------------------------------
+# Authenticated-user identity (auth hot path)
+# ---------------------------------------------------------------------------
+#: Lifetime for the identity cache (seconds). Every authenticated request used
+#: to pay a Postgres round-trip just to resolve the caller
+#: (``get_or_create_user``); caching the identity row removes that query from
+#: the hot path so a burst of dashboard polls does not each hold a pooled
+#: connection. Kept short because role/plan/is_active changes are
+#: security-relevant: admin mutations invalidate explicitly, and this TTL is
+#: the backstop for changes made outside the API.
+USER_TTL_SECONDS = 30
+
+
+def get_user(firebase_uid: str, client: "redis.Redis | None" = None) -> Any | None:
+    """Return the cached identity payload for a Firebase UID, or None."""
+    if not firebase_uid:
+        return None
+    return _read(f"user:{firebase_uid}", client)
+
+
+def set_user(
+    firebase_uid: str,
+    payload: Any,
+    ttl: int = USER_TTL_SECONDS,
+    client: "redis.Redis | None" = None,
+) -> None:
+    """Cache an identity payload for a Firebase UID."""
+    if not firebase_uid:
+        return
+    _write(f"user:{firebase_uid}", payload, ttl, client)
+
+
+def invalidate_user(firebase_uid: str, client: "redis.Redis | None" = None) -> None:
+    """Drop the cached identity for a Firebase UID (role/plan/is_active change)."""
+    if not firebase_uid:
+        return
+    _drop((f"user:{firebase_uid}",), client)
+
+
+# ---------------------------------------------------------------------------
+# Saved-accounts list
+# ---------------------------------------------------------------------------
+#: Lifetime for the saved-accounts list (seconds). The list is derived from the
+#: on-disk credentials index plus a ``saved_accounts`` scan, neither of which
+#: changes except on explicit account mutations (which invalidate) or an async
+#: capture completing (covered by this TTL).
+ACCOUNTS_TTL_SECONDS = 30
+
+
+def get_accounts(user_id: int | None, client: "redis.Redis | None" = None) -> Any | None:
+    """Return the cached saved-accounts payload for a user, or None."""
+    if user_id is None:
+        return None
+    return _read(f"accounts:{user_id}", client)
+
+
+def set_accounts(
+    user_id: int | None,
+    payload: Any,
+    ttl: int = ACCOUNTS_TTL_SECONDS,
+    client: "redis.Redis | None" = None,
+) -> None:
+    """Cache the saved-accounts payload for a user."""
+    if user_id is None:
+        return
+    _write(f"accounts:{user_id}", payload, ttl, client)
+
+
+def invalidate_accounts(user_id: int | None, client: "redis.Redis | None" = None) -> None:
+    """Drop the cached saved-accounts payload for a user (account mutation)."""
+    if user_id is None:
+        return
+    _drop((f"accounts:{user_id}",), client)

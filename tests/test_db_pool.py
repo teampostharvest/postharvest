@@ -162,3 +162,19 @@ def test_transaction_pool_kwargs_reflect_the_worker_role(monkeypatch):
     kwargs = dbmod.postgres_pool_kwargs(TRANSACTION_URL)
     assert (kwargs["pool_size"], kwargs["max_overflow"]) == dbmod._POOL_TRANSACTION_WORKER
     assert kwargs["connect_args"]["prepare_threshold"] is None
+
+
+def test_arq_api_pool_exceeds_the_worker_pool(monkeypatch):
+    """The API keeps the larger share: it serves the dashboard's polls.
+
+    A scrape-time burst of authenticated dashboard requests exhausted the
+    API's pool while the worker held its own; giving the API more headroom
+    than the (single-scrape) worker is the rebalance that prevents it.
+    """
+    _pooler_settings(monkeypatch, job_execution="arq", process_role="api")
+    api_total = sum(dbmod.transaction_pool_sizes())
+
+    _pooler_settings(monkeypatch, job_execution="arq", process_role="worker")
+    worker_total = sum(dbmod.transaction_pool_sizes())
+
+    assert api_total > worker_total
