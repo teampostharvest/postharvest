@@ -126,6 +126,8 @@ services:
       JOB_EXECUTION: ${JOB_EXECUTION:-inline}
       ARQ_QUEUE_NAME: ${ARQ_QUEUE_NAME:-arq:queue}
       ARQ_JOB_TIMEOUT_SECONDS: ${ARQ_JOB_TIMEOUT_SECONDS:-21600}
+      # Role for role-aware Postgres pool sizing (api | worker).
+      PROCESS_ROLE: ${PROCESS_ROLE:-api}
     depends_on:
       redis:
         condition: service_healthy
@@ -189,6 +191,7 @@ services:
     command: ["arq", "backend.worker.WorkerSettings"]
     environment:
       JOB_EXECUTION: arq
+      PROCESS_ROLE: worker
     healthcheck:
       disable: true
 

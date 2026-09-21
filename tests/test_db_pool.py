@@ -98,3 +98,67 @@ def test_migrations_run_on_session_mode_not_the_transaction_pooler():
     # Session/direct and sqlite URLs are passed through untouched.
     assert dbmod.session_url_for_migrations(SESSION_URL) == SESSION_URL
     assert dbmod.session_url_for_migrations("sqlite:///x.db") == "sqlite:///x.db"
+
+
+# ---------------------------------------------------------------------------
+# Role-aware sizing: the API and an arq worker share ONE Supavisor pool, so
+# their client pools must SUM to the budget, not each claim it.
+# ---------------------------------------------------------------------------
+
+
+def _pooler_settings(monkeypatch, *, job_execution: str, process_role: str) -> None:
+    class _Settings:
+        supabase_db_url = TRANSACTION_URL
+        database_url = "sqlite:///./data/postharvest.db"
+
+    settings = _Settings()
+    settings.job_execution = job_execution
+    settings.process_role = process_role
+    monkeypatch.setattr(dbmod, "get_settings", lambda: settings)
+
+
+def test_inline_process_owns_the_whole_pooler_budget(monkeypatch):
+    _pooler_settings(monkeypatch, job_execution="inline", process_role="api")
+    pool_size, max_overflow = dbmod.transaction_pool_sizes()
+    assert (pool_size, max_overflow) == dbmod._POOL_TRANSACTION_INLINE
+    assert pool_size + max_overflow == dbmod._POOLER_BUDGET
+
+
+def test_api_and_worker_pools_sum_to_the_budget(monkeypatch):
+    _pooler_settings(monkeypatch, job_execution="arq", process_role="api")
+    api_total = sum(dbmod.transaction_pool_sizes())
+
+    _pooler_settings(monkeypatch, job_execution="arq", process_role="worker")
+    worker_total = sum(dbmod.transaction_pool_sizes())
+
+    assert api_total + worker_total == dbmod._POOLER_BUDGET
+    assert api_total + worker_total <= dbmod._POOLER_SERVER_POOL
+
+
+def test_arq_api_pool_is_smaller_than_the_inline_pool(monkeypatch):
+    _pooler_settings(monkeypatch, job_execution="inline", process_role="api")
+    inline_total = sum(dbmod.transaction_pool_sizes())
+
+    _pooler_settings(monkeypatch, job_execution="arq", process_role="api")
+    arq_api_total = sum(dbmod.transaction_pool_sizes())
+
+    assert arq_api_total < inline_total
+
+
+def test_no_role_can_exceed_the_pooler_server_pool(monkeypatch):
+    worst = 0
+    for job_execution, process_role in (
+        ("inline", "api"),
+        ("arq", "api"),
+        ("arq", "worker"),
+    ):
+        _pooler_settings(monkeypatch, job_execution=job_execution, process_role=process_role)
+        worst = max(worst, sum(dbmod.transaction_pool_sizes()))
+    assert worst <= dbmod._POOLER_SERVER_POOL
+
+
+def test_transaction_pool_kwargs_reflect_the_worker_role(monkeypatch):
+    _pooler_settings(monkeypatch, job_execution="arq", process_role="worker")
+    kwargs = dbmod.postgres_pool_kwargs(TRANSACTION_URL)
+    assert (kwargs["pool_size"], kwargs["max_overflow"]) == dbmod._POOL_TRANSACTION_WORKER
+    assert kwargs["connect_args"]["prepare_threshold"] is None

@@ -67,6 +67,40 @@ def session_url_for_migrations(url: str) -> str:
     return url
 
 
+# Supavisor's server-side pool (``default_pool_size`` on Supabase's shared
+# pooler) is the real concurrency ceiling for the transaction pooler. Every
+# process using the DSN draws from the SAME server connections, so the SUM of
+# all client pools must stay below it — past that, bursts do not queue
+# client-side, they fail with ``ECHECKOUTTIMEOUT: unable to check out
+# connection`` (measured: 20 concurrent queries -> 4 hard errors).
+_POOLER_SERVER_POOL = 15
+# Left for the host CLI and the one-off Alembic migration run.
+_POOLER_RESERVED = 3
+_POOLER_BUDGET = _POOLER_SERVER_POOL - _POOLER_RESERVED  # 12
+
+# Client-pool splits of that budget, as (pool_size, max_overflow).
+_POOL_TRANSACTION_INLINE = (8, 4)  # one process owns the whole budget
+_POOL_TRANSACTION_API_WITH_WORKER = (6, 2)  # API sheds scrape load to the worker
+_POOL_TRANSACTION_WORKER = (3, 1)  # 8 + 4 == 12, within budget
+
+
+def transaction_pool_sizes() -> tuple[int, int]:
+    """Client-pool size for this process under the shared pooler budget.
+
+    With ``inline`` execution one process (the API) uses the whole budget.
+    With an arq worker two processes share the pooler, so the API shrinks and
+    the worker takes a small pool — their **sum** stays within budget, which is
+    what keeps a burst from oversubscribing Supavisor's server pool.
+    """
+    settings = get_settings()
+    role = getattr(settings, "process_role", "api")
+    if role == "worker":
+        return _POOL_TRANSACTION_WORKER
+    if getattr(settings, "job_execution", "inline") == "arq":
+        return _POOL_TRANSACTION_API_WITH_WORKER
+    return _POOL_TRANSACTION_INLINE
+
+
 def postgres_pool_kwargs(url: str) -> dict:
     """Connection-pool guardrails for PostgreSQL (Supabase pooler).
 
@@ -75,12 +109,14 @@ def postgres_pool_kwargs(url: str) -> dict:
     * **Transaction pooler (6543)** — Supavisor multiplexes many client
       connections onto a small number of server connections, so the 15-session
       ceiling that wedged the API on the session pooler no longer applies. The
-      client pool can therefore be sized generously without opening a matching
-      number of Postgres backends. Server-side prepared statements are
-      unusable, though: the backend connection can change between statements,
-      so ``prepare_threshold=None`` disables them (psycopg3). This is the plan's
-      §7 "PgBouncer in transaction mode" prerequisite, satisfied by Supabase's
-      managed pooler instead of a self-hosted PgBouncer.
+      client pool is sized from the process's role (see
+      :func:`transaction_pool_sizes`) so that when an arq worker shares the
+      pooler the **sum** of both client pools still fits its server pool.
+      Server-side prepared statements are unusable, though: the backend
+      connection can change between statements, so ``prepare_threshold=None``
+      disables them (psycopg3). This is the plan's §7 "PgBouncer in transaction
+      mode" prerequisite, satisfied by Supabase's managed pooler instead of a
+      self-hosted PgBouncer.
 
     * **Session/direct (5432)** — the original conservative pool. The shared
       session pooler caps at 15 clients TOTAL across every backend, so this
@@ -101,18 +137,14 @@ def postgres_pool_kwargs(url: str) -> dict:
 
     if is_transaction_pooler(url):
         connect_args["prepare_threshold"] = None
-        # The client pool must stay BELOW Supavisor's server-side pool
-        # (``default_pool_size`` = 15 on Supabase's shared pooler). Supavisor
-        # checks out a server connection per transaction; pushing more than
-        # that concurrently does not queue client-side, it fails with
-        # ``ECHECKOUTTIMEOUT: unable to check out connection`` — measured by
-        # firing 20 concurrent queries (4 hard errors). Capping the client pool
-        # at 12 keeps 3 server slots in reserve (host CLI / migrations) and
-        # turns any burst beyond 12 into a bounded local wait instead of an
-        # error.
+        pool_size, max_overflow = transaction_pool_sizes()
+        # The client pool must stay BELOW Supavisor's server-side pool; keeping
+        # the pooler's total budget intact across every process sharing the DSN
+        # turns any burst beyond it into a bounded local wait instead of an
+        # ``ECHECKOUTTIMEOUT`` error.
         return {
-            "pool_size": 8,
-            "max_overflow": 4,
+            "pool_size": pool_size,
+            "max_overflow": max_overflow,
             "pool_timeout": 10,
             # Supavisor keeps the client connection alive; recycle rarely.
             "pool_recycle": 1800,

@@ -106,6 +106,15 @@ class Settings(BaseSettings):
             raise ValueError("job_execution must be 'inline' or 'arq'")
         return normalized
 
+    @field_validator("process_role")
+    @classmethod
+    def _normalize_process_role(cls, value: str) -> str:
+        """Normalize and constrain the process role to a known value."""
+        normalized = (value or "api").strip().lower()
+        if normalized not in ("api", "worker"):
+            raise ValueError("process_role must be 'api' or 'worker'")
+        return normalized
+
     # --- worker / job manager ---------------------------------------------------
     worker_threads: int = 4
     # Where jobs execute: "inline" runs them in the API process's thread pool
@@ -113,6 +122,11 @@ class Settings(BaseSettings):
     # enqueues them over Redis to a separate worker process (backend/worker.py),
     # so the API can restart/scale without owning execution.
     job_execution: str = "inline"
+    # This process's role. The API and an arq worker share one Supabase pooler,
+    # so each sizes its Postgres client pool from its role and the execution
+    # backend to keep the SUM below the pooler's server-side ceiling — see
+    # ``backend.core.database.postgres_pool_kwargs``.
+    process_role: str = "api"
     # arq's Redis queue name. arq keeps its own `arq:` keyspace (queue, job,
     # result, in-progress); it must not collide with `job:` (§8b) or `cache:`.
     arq_queue_name: str = "arq:queue"

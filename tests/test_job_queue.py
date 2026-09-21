@@ -227,3 +227,10 @@ def test_job_execution_setting_is_normalized_and_validated():
     assert Settings(job_execution=" Inline ").job_execution == "inline"
     with pytest.raises(ValidationError):
         Settings(job_execution="celery")
+
+
+def test_process_role_setting_is_normalized_and_validated():
+    assert Settings(process_role="WORKER").process_role == "worker"
+    assert Settings(process_role="api").process_role == "api"
+    with pytest.raises(ValidationError):
+        Settings(process_role="scheduler")
