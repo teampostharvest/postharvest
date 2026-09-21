@@ -20,6 +20,22 @@
 # PostgreSQL hardening anymore.
 
 services:
+  # redis — ephemeral coordination state only; light hardening, no persistence.
+  redis:
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    mem_limit: ${REDIS_MEM_LIMIT:-320m}
+    cpus: ${REDIS_CPUS:-0.5}
+
   backend:
     read_only: true
     tmpfs:

@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.api import accounts, admin, exports, health, jobs, scrape, usage
+from backend.core import job_state
 from backend.core.config import get_settings
 from backend.core.database import init_db
 from backend.core.exceptions import AppError
@@ -60,6 +61,7 @@ async def lifespan(_app: FastAPI):
     logger.info("Application started (db=%s)", effective_url)
     yield
     JobManager.get().shutdown()
+    job_state.close()  # drop the Redis client (best-effort, degraded when unset)
     logger.info("Application shutdown complete")
 
 

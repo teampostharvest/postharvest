@@ -17,10 +17,12 @@
 #
 # Service wiring:
 #   web       network: nginx, frontend, backend   (browser-facing path)
-#   isolated  network: backend, postgres          (internal: no route out)
+#   isolated  network: backend, redis, postgres   (internal: no route out)
 #
-# Playwright/Chromium is baked into the backend image; job state is in-process
-# worker threads, so the backend MUST stay a single replica.
+# Playwright/Chromium is baked into the backend image. Job status/progress/
+# cancel signals are mirrored to Redis (finalplanv2 §8b/§11 Phase 1); worker
+# execution is still in-process threads, so the backend remains a single
+# replica until the arq worker slice lands.
 name: postharvest
 
 services:
@@ -118,6 +120,11 @@ services:
       # Live session capture (loopback CDP; proxied same-origin by the API).
       SESSION_CAPTURE_PORT: ${SESSION_CAPTURE_PORT:-9333}
       SESSION_CAPTURE_TIMEOUT_SECONDS: ${SESSION_CAPTURE_TIMEOUT_SECONDS:-240.0}
+      # Redis job-state mirror + cancel coordination (finalplanv2 §8b/§11).
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       # Bind-mount the repo data/ dir so the CLI (host) and the container share
       # the same cookie store / exports. Keep the file layout identical to
@@ -134,6 +141,30 @@ services:
     restart: unless-stopped
     networks:
       - web
+      - isolated
+
+  # =====================================================================
+  # redis — job state / cancel coordination (finalplanv2 §8b, §11 Phase 1)
+  # Ephemeral coordination state only: status/progress mirrors + cancel
+  # flags. No persistence (appendonly off) — Postgres owns durability, and a
+  # Redis outage degrades every feature to pre-Redis DB-only behaviour.
+  # Internal-only: lives on the `isolated` network with postgres, reachable
+  # by nothing outside the stack.
+  # =====================================================================
+  redis:
+    image: redis:7.4-alpine
+    container_name: postharvest-redis
+    init: true
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    stop_grace_period: 10s
+    networks:
       - isolated
 
   # =====================================================================

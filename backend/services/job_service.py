@@ -46,6 +46,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.core.config import get_settings
 from backend.core.database import SessionLocal
 from backend.core.exceptions import AppError, InvalidInputError
+from backend.core import job_state
 from backend.core.job_manager import CancelToken, JobManager
 from backend.core.logging import get_logger
 from backend.models.engagement_metrics import EngagementMetric
@@ -355,6 +356,7 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
     db.refresh(job)
 
     job_manager.submit(job_id, run_scrape_job)
+    job_state.set_status(job_id, "queued")  # Redis mirror (finalplanv2 §8b)
     logger.info(
         "Job %s queued: %d source(s) valid (%s), %d invalid URL(s)",
         job_id,
@@ -398,6 +400,7 @@ def _run_job_inner(job_id: str, token: CancelToken | None) -> None:
         options_snapshot: dict = job.options or {}
         owner_id: int | None = job.owner_id
         db.commit()
+    job_state.set_status(job_id, "running")  # Redis mirror (finalplanv2 §8b)
 
     with SessionLocal() as db:
         source_ids = list(
@@ -648,6 +651,9 @@ def _finalize(job_id: str, token: CancelToken | None) -> None:
         job.completed_at = _now()
         job.updated_at = _now()
         db.commit()
+    # Redis mirror for the terminal status (finalplanv2 §8b). The mirror key
+    # stays put so replicas can read a terminal job without hitting the DB.
+    job_state.set_status(job_id, "failed" if cancelled else "completed")
 
 
 def _finalize_failure(job_id: str, code: str, message: str) -> None:
@@ -663,6 +669,7 @@ def _finalize_failure(job_id: str, code: str, message: str) -> None:
             ScrapeError(job_id=job_id, source_url="", code=code, message=message)
         )
         db.commit()
+    job_state.set_status(job_id, "failed")  # Redis mirror (finalplanv2 §8b)
 
 
 # ---------------------------------------------------------------------------
@@ -722,6 +729,10 @@ def sweep_orphaned_jobs() -> dict:
                     )
                     .values(status="failed")
                 )
+                # No worker exists for these rows anymore: drop any lingering
+                # Redis job-state keys so a later replica never reads stale
+                # "running" state for a job that can not progress (§8b).
+                job_state.delete_state(job.id)
             queued = db.scalars(
                 select(ScrapeJob.id).where(ScrapeJob.status == "queued")
             ).all()
@@ -1115,3 +1126,7 @@ def _persist_progress(job_id: str, source_id: int, counters: dict) -> None:
             db.commit()
     except Exception:  # noqa: BLE001 - never crash the worker over progress
         logger.debug("Progress persistence failed for job %s", job_id, exc_info=True)
+        return
+    # Redis mirror: same live counters, so any replica can render progress
+    # without touching Postgres (finalplanv2 §8b).
+    job_state.set_progress(job_id, counters)

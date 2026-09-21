@@ -6,6 +6,10 @@
 
 pytest>=9.1.1
 
+# fakeredis: hermetic Redis client for the job-state tests — implements the
+# same client API in-process, so the suite never opens a network connection.
+fakeredis==2.38.0
+
 # NOTE (pytest-asyncio): deliberately NOT required.  The FastAPI surface under
 # test is synchronous (def routes) and background jobs run in
 # threading.ThreadPoolExecutor threads; tests poll with short sleeps.  No

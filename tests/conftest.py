@@ -60,6 +60,11 @@ os.environ["COOKIE_ENCRYPTION_KEY"] = ""
 os.environ["EXPORT_BASE_DIR"] = str(_SESSION_TMP / "exports")
 os.environ["DATA_DIR"] = str(_SESSION_TMP / "data")
 os.environ["CANCEL_WAIT_SECONDS"] = "2"  # keep DELETE/cancellation tests fast
+# REDIS_URL — job-state mirrors degrade to DB-only when empty, which is
+# exactly the pre-Redis behaviour the hermetic suite assumes (no network,
+# no Redis daemon). The Redis-backed path is covered by dedicated fakeredis
+# tests in tests/test_job_state_redis.py.
+os.environ["REDIS_URL"] = ""
 
 import pytest  # noqa: E402
 
@@ -86,6 +91,11 @@ def _check_environment() -> None:
         "plaintext cookie jars"
     )
     assert s.cancel_wait_seconds == 2.0, "CANCEL_WAIT_SECONDS did not take effect"
+    assert not s.redis_url, (
+        "REDIS_URL leaked from root .env into the test process; the hermetic "
+        "suite must not open a real Redis connection. The Redis-backed job "
+        "state path is covered by fakeredis tests instead."
+    )
 
 
 _check_environment()

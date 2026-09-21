@@ -108,6 +108,14 @@ class Settings(BaseSettings):
     # before deleting the rows (best-effort cancellation).
     cancel_wait_seconds: float = 5.0
 
+    # --- Redis job state (finalplanv2 §8b/§11 Phase 1) -------------------------
+    # URL for the process-wide Redis client (e.g. redis://redis:6379/0 in
+    # compose, redis://localhost:6379/0 on the host). When unset or
+    # unreachable, job-state mirrors degrade to DB-only behaviour and
+    # cancellation falls back to the in-process CancelToken event — the app
+    # never blocks or crashes on Redis.
+    redis_url: str | None = None
+
     # --- HTTP -------------------------------------------------------------------
     # Comma-free JSON array; e.g. CORS_ORIGINS='["http://localhost:3000"]'
     cors_origins: list[str] = [
