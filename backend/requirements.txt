@@ -7,7 +7,7 @@
 # are listed here as well. Keep the pinned set minimal and compatible.
 
 fastapi==0.141.1
-uvicorn==0.52.4
+uvicorn==0.53.0
 # WebSocket runtime for the session-capture CDP bridge (uvicorn without
 # [standard] bundles no websocket implementation).
 websockets==17.1
