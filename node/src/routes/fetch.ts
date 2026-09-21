@@ -82,6 +82,10 @@ export function registerFetchRoutes(
         content_type: result.contentType,
         raw_payload: result.body.toString("base64"),
         fetched_at_ms: result.fetchedAtMs,
+        // Contract discipline (finalplanv2 §6): http-mode emits the canonical
+        // FetchResponse shape — repeated -> [] and missing message -> null.
+        updated_cookies: [],
+        browser_stats: null,
       };
       return reply.code(200).send(response);
     } catch (err) {

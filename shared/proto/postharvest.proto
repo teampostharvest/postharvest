@@ -102,14 +102,34 @@ message FetchRequest {
   string target_url = 1;     // validated https://www.facebook.com/... URL
   string mode = 2;           // "http" | "browser" ("browser" = Playwright)
   string account_id = 3;     // saved session to use, if any ("" == none)
+  // Browser mode only (0 == service default; finalplanv2 §4 browser-mode):
+  int32 scroll_rounds = 4;   // max scroll rounds while capturing the feed
+  int32 max_posts = 5;       // early-stop quota on discovered posts (0 == none)
+  // Session cookie lines (RFC 6265 "name=value; ...") for the browser
+  // context of THIS fetch. FastAPI resolves them from its own store and node
+  // never persists them — database access stays Python-only (§2, §7, §12).
+  repeated string cookies = 6;
+}
+
+// Browser-mode capture summary, returned with an http-mode-or-browser fetch.
+message BrowserStats {
+  bool login_wall = 1;       // the capture hit a login/checkpoint wall
+  bool feed_missing = 2;     // no Comet /api/graphql/ feed payloads captured
+  int32 posts_found = 3;     // unique posts discovered (DOM + script + graphql)
 }
 
 message FetchResponse {
   int32 status_code = 1;     // HTTP status of the final response
   string final_url = 2;      // URL after redirects
-  string content_type = 3;   // "text/html" | "application/json" (GraphQL)
+  string content_type = 3;   // "text/html" | "application/json" (GraphQL);
+                             // browser-mode snapshots are always "text/html"
   bytes raw_payload = 4;     // raw body bytes, never interpreted here
   int64 fetched_at_ms = 5;   // monotonic-ish capture timestamp
+  // Browser mode only; repeated -> [] and message -> null when the fetch was
+  // not a browser fetch (proto3 JSON defaults, §6).
+  repeated string updated_cookies = 6;  // refreshed session to persist back —
+                                        // FastAPI owns the store, node never does
+  BrowserStats browser_stats = 7;       // null unless mode == "browser"
 }
 
 // ---------------------------------------------------------------------------

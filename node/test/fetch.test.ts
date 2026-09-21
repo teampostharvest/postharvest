@@ -161,6 +161,10 @@ describe("POST /fetch", () => {
       "<html><body>hello</body></html>",
     );
     expect(json.fetched_at_ms).toBe(1_758_432_000_000);
+    // Canonical FetchResponse shape (proto3 JSON defaults, §6): http-mode
+    // emits repeated -> [] and message -> null.
+    expect(json.updated_cookies).toEqual([]);
+    expect(json.browser_stats).toBeNull();
     await app.close();
   });
 

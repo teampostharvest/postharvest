@@ -3,5 +3,7 @@
   "final_url": "https://www.facebook.com/NASA",
   "content_type": "text/html",
   "raw_payload": "PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjx0aXRsZT5OYXNhIEx1bmFyIFBpY3R1cmVzPC90aXRsZT48L2hlYWQ+PGJvZHk+PGRpdiBjbGFzcz0idXNlckNvbnRlbnQiPjxwIGNsYXNzPSJwaWQiIGRhdGEtcGlkPSIxMjM0NTY3ODkwMTAwMCI+U2FtcGxlIHB1YmxpYyBwb3N0IHRleHQgd2l0aCAjaGFzaHRhZyB0ZXN0PC9wPjxkaXYgZGF0YS1yZWFjdGlvbi1jb3VudD0iNDIiPjwvZGl2PjwvZGl2PjwvYm9keT48L2h0bWw+",
-  "fetched_at_ms": 1758432000000
+  "fetched_at_ms": 1758432000000,
+  "updated_cookies": [],
+  "browser_stats": null
 }
