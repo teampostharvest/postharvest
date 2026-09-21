@@ -4,9 +4,10 @@ Responsibilities
 ----------------
 * ``start_scrape_job`` — validate submitted URLs with the scraper's
   ``validate_facebook_url``, persist the job + sources + validation errors,
-  and hand the job to the background :class:`JobManager` so POST /api/scrape
+  and hand the job to the background :func:`get_job_queue` so POST /api/scrape
   returns immediately with ``{"job_id", "status": "queued"}``.
-* ``run_scrape_job`` — worker entry point (executes in a pool thread):
+* ``run_scrape_job`` — worker entry point (executes on the configured job
+  queue: an inline pool thread, or a separate arq worker):
   queued -> running -> completed/failed; one source never fails the whole job;
   per-source progress is persisted to the DB so GET /api/jobs/{id} reflects
   live counters; cancellation is honoured between sources and via the
@@ -47,7 +48,8 @@ from backend.core.config import get_settings
 from backend.core.database import SessionLocal
 from backend.core.exceptions import AppError, InvalidInputError
 from backend.core import cache, job_state
-from backend.core.job_manager import CancelToken, JobManager
+from backend.core.job_manager import CancelToken
+from backend.core.job_queue import get_job_queue
 from backend.core.logging import get_logger
 from backend.models.engagement_metrics import EngagementMetric
 from backend.models.errors import ScrapeError
@@ -59,9 +61,6 @@ from backend.services import crawl_state_service
 from backend.schemas.scrape import ScrapeRequest
 
 logger = get_logger("services.job_service")
-
-# Process-wide background runner.
-job_manager = JobManager.get()
 
 # Scraper exception class name -> persisted error code. Kept as a plain name
 # mapping so the core app never hard-depends on the scraper's errors module.
@@ -355,7 +354,7 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
     db.commit()
     db.refresh(job)
 
-    job_manager.submit(job_id, run_scrape_job)
+    get_job_queue().submit(job_id, run_scrape_job)
     job_state.set_status(job_id, "queued")  # Redis mirror (finalplanv2 §8b)
     cache.invalidate_usage(owner_id)  # quota readout changed (active jobs +1)
     logger.info(
@@ -374,8 +373,8 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
 
 
 def run_scrape_job(job_id: str) -> None:
-    """Worker entry point (runs inside a JobManager pool thread)."""
-    token = job_manager.token(job_id)
+    """Worker entry point (runs on the configured job queue)."""
+    token = get_job_queue().token(job_id)
     try:
         _run_job_inner(job_id, token)
     except AppError as exc:
@@ -747,10 +746,10 @@ def sweep_orphaned_jobs() -> dict:
         logger.exception("Startup sweep failed; will retry on next boot")
         return {"failed": [], "resumed": []}
 
-    manager = JobManager.get()
+    queue = get_job_queue()
     for job_id in resumed:
         try:
-            manager.submit(job_id, run_scrape_job)
+            queue.submit(job_id, run_scrape_job)
         except Exception:  # noqa: BLE001 - one bad job must not stop the sweep
             logger.exception("Startup sweep could not resume job %s", job_id)
     if failed or resumed:

@@ -97,8 +97,29 @@ class Settings(BaseSettings):
             return [part.strip() for part in value.split(",") if part.strip()]
         return value
 
+    @field_validator("job_execution")
+    @classmethod
+    def _normalize_job_execution(cls, value: str) -> str:
+        """Normalize and constrain the execution backend to a known value."""
+        normalized = (value or "inline").strip().lower()
+        if normalized not in ("inline", "arq"):
+            raise ValueError("job_execution must be 'inline' or 'arq'")
+        return normalized
+
     # --- worker / job manager ---------------------------------------------------
     worker_threads: int = 4
+    # Where jobs execute: "inline" runs them in the API process's thread pool
+    # (default; also the only path the hermetic test suite can use). "arq"
+    # enqueues them over Redis to a separate worker process (backend/worker.py),
+    # so the API can restart/scale without owning execution.
+    job_execution: str = "inline"
+    # arq's Redis queue name. arq keeps its own `arq:` keyspace (queue, job,
+    # result, in-progress); it must not collide with `job:` (§8b) or `cache:`.
+    arq_queue_name: str = "arq:queue"
+    # Hard ceiling for a single arq job. Deep scrapes run long, so this is
+    # generous; it exists to bound a genuinely wedged job, never to truncate a
+    # healthy one. (arq treats 0 as "expire immediately" — do not use 0.)
+    arq_job_timeout_seconds: int = 21600
     # Global hard cap per job, applied on top of per-plan URL limits. Must sit
     # above the highest plan ceiling (Team = 150) so plan numbers are reachable.
     max_urls_per_job: int = 300

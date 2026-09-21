@@ -122,6 +122,10 @@ services:
       SESSION_CAPTURE_TIMEOUT_SECONDS: ${SESSION_CAPTURE_TIMEOUT_SECONDS:-240.0}
       # Redis job-state mirror + cancel coordination (finalplanv2 §8b/§11).
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Execution backend: inline (this process) | arq (separate worker).
+      JOB_EXECUTION: ${JOB_EXECUTION:-inline}
+      ARQ_QUEUE_NAME: ${ARQ_QUEUE_NAME:-arq:queue}
+      ARQ_JOB_TIMEOUT_SECONDS: ${ARQ_JOB_TIMEOUT_SECONDS:-21600}
     depends_on:
       redis:
         condition: service_healthy
@@ -166,6 +170,27 @@ services:
     stop_grace_period: 10s
     networks:
       - isolated
+
+  # =====================================================================
+  # worker — optional out-of-process execution (JOB_EXECUTION=arq)
+  # Same image as the backend, but runs the arq worker instead of the API
+  # (finalplanv2 §8b/§11 Phase 1). Gated behind the `worker` profile so the
+  # default single-process stack is unchanged; enable with:
+  #   JOB_EXECUTION=arq docker compose --profile prod --profile worker up -d
+  # It shares the backend's data volume (personal cookie jars) and DB/Redis
+  # but serves no HTTP, so the API healthcheck is disabled.
+  # =====================================================================
+  worker:
+    extends:
+      service: backend
+    container_name: postharvest-worker
+    profiles:
+      - worker
+    command: ["arq", "backend.worker.WorkerSettings"]
+    environment:
+      JOB_EXECUTION: arq
+    healthcheck:
+      disable: true
 
   # =====================================================================
   # frontend — Next.js standalone server on :3000

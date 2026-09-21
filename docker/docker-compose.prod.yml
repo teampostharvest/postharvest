@@ -65,6 +65,19 @@ services:
     mem_limit: ${FRONTEND_MEM_LIMIT:-512m}
     cpus: ${FRONTEND_CPUS:-1.0}
 
+  # Same hardening as the backend: the arq worker runs untrusted-ish scraping
+  # code too, and needs only /tmp scratch.
+  worker:
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${WORKER_MEM_LIMIT:-1g}
+    cpus: ${WORKER_CPUS:-1.5}
+
   nginx:
     read_only: true
     tmpfs:
