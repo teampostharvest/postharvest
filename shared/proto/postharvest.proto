@@ -4,8 +4,8 @@
 // three services agree on:
 //
 //   FastAPI (Python)  -- orchestration; the ONLY public surface
-//   node-fetcher (JS) -- the ONLY service that talks to Facebook
-//   go-worker (Go)    -- pure compute (parse / normalize / dedup / export)
+//   node (JS) -- the ONLY service that talks to Facebook
+//   go (Go)       -- pure compute (parse / normalize / dedup / export)
 //
 // Phase 1 (build & stabilize) speaks plain HTTP + JSON. The JSON shapes used
 // on the wire are the literal proto3 field names below (null maps to the
@@ -96,7 +96,7 @@ message Post {
 }
 
 // ---------------------------------------------------------------------------
-// FastAPI -> node-fetcher: fetch one Facebook page/profile URL.
+// FastAPI -> node: fetch one Facebook page/profile URL.
 // ---------------------------------------------------------------------------
 message FetchRequest {
   string target_url = 1;     // validated https://www.facebook.com/... URL
@@ -113,7 +113,7 @@ message FetchResponse {
 }
 
 // ---------------------------------------------------------------------------
-// FastAPI -> go-worker: parse + normalize + dedup a raw payload into the
+// FastAPI -> go: parse + normalize + dedup a raw payload into the
 // canonical Posts. Node and Go never hold a DB connection; FastAPI passes any
 // needed context in the request (finalplanv2.md §7).
 // ---------------------------------------------------------------------------

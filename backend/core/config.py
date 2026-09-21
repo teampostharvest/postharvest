@@ -125,6 +125,18 @@ class Settings(BaseSettings):
     scraper_max_retries: int = 3
     scraper_robots: bool = True
 
+    # --- node fetch seam (finalplanv2 §4/§14) ---------------------------
+    # When ON, HTTP-mode page fetches are delegated to the node service
+    # (the only service allowed to talk to Facebook). Feature-flagged so the
+    # legacy Python Fetcher stays the default until parity is proven; node
+    # owns robots.txt, the shared Redis token bucket and retries, while FastAPI
+    # keeps orchestrating variants / parsing / job bookkeeping.
+    use_node: bool = False
+    # Base URL of the node service. Defaults to the host-dev location;
+    # Docker Compose overrides it to http://node:9334 on the stack
+    # network (see docker/docker-compose.yml backend environment).
+    node_base_url: str = "http://127.0.0.1:9334"
+
     # --- proxy support (optional) -----------------------------------------------
     proxy_enabled: bool = False
     proxy_url: str | None = None

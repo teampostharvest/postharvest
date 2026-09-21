@@ -1,5 +1,5 @@
 /**
- * node-fetcher — the only service that talks to Facebook (finalplanv2.md §4).
+ * node — the only service that talks to Facebook (finalplanv2.md §4).
  *
  * App factory + entrypoint. Internal-only service: FastAPI talks to it, it
  * never talks back to the public web except for the configured Facebook
@@ -77,7 +77,7 @@ export async function start(): Promise<void> {
     await app.listen({ host: config.host, port: config.port });
     app.log.info(
       { port: config.port, redis: redis ? "configured" : "unconfigured" },
-      "node-fetcher listening",
+      "node listening",
     );
   } catch (err) {
     app.log.error(err, "failed to start");

@@ -13,7 +13,7 @@ export function registerHealthRoutes(
 ): void {
   app.get("/healthz", async () => ({
     status: "ok",
-    service: "node-fetcher",
+    service: "node",
     version: "0.1.0",
     uptime_s: Math.round(process.uptime()),
   }));

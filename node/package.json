@@ -1,5 +1,5 @@
 {
-  "name": "node-fetcher",
+  "name": "node",
   "version": "0.1.0",
   "private": true,
   "description": "PostHarvest fetcher — the only service that talks to Facebook (finalplanv2.md §4)",

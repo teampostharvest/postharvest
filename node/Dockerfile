@@ -1,4 +1,4 @@
-# node-fetcher — PostHarvest fetch service (finalplanv2.md §12)
+# node — PostHarvest fetch service (finalplanv2.md §12)
 # Multi-stage: build TS once, ship only compiled JS + prod deps.
 
 FROM node:22-alpine AS build

@@ -43,14 +43,14 @@ export interface Post {
   scraped_at: string | null; // UTC ISO-8601
 }
 
-/** FastAPI -> node-fetcher. */
+/** FastAPI -> node. */
 export interface FetchRequest {
   target_url: string;
   mode: "http" | "browser";
   account_id?: string | null;
 }
 
-/** node-fetcher -> FastAPI. `raw_payload` is base64 of the raw body bytes. */
+/** node -> FastAPI. `raw_payload` is base64 of the raw body bytes. */
 export interface FetchResponse {
   status_code: number;
   final_url: string;
@@ -59,14 +59,14 @@ export interface FetchResponse {
   fetched_at_ms: number;
 }
 
-/** FastAPI -> go-worker. */
+/** FastAPI -> go. */
 export interface ParseRequest {
   raw_payload: string; // base64
   content_type: "html" | "graphql_json";
   idempotency_key: string;
 }
 
-/** go-worker -> FastAPI. */
+/** go -> FastAPI. */
 export interface ParseResponse {
   posts: Post[];
   errors: string[];

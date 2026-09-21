@@ -110,6 +110,11 @@ services:
       SCRAPER_TIMEOUT_SECONDS: ${SCRAPER_TIMEOUT_SECONDS:-20}
       SCRAPER_MAX_RETRIES: ${SCRAPER_MAX_RETRIES:-3}
       SCRAPER_ROBOTS: ${SCRAPER_ROBOTS:-1}
+      # node fetch seam (finalplanv2 §14): when USE_NODE=1 the
+      # backend delegates HTTP-mode page fetches to the node service.
+      # BASE_URL matches the compose service name on the stack network.
+      USE_NODE: ${USE_NODE:-0}
+      NODE_BASE_URL: ${NODE_BASE_URL:-http://node:9334}
       COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-}
       # Comma-separated emails auto-promoted to the ops role on first login.
       OPS_EMAILS: ${OPS_EMAILS:-}
@@ -184,26 +189,26 @@ services:
       - web
 
   # =====================================================================
-  # node-fetcher — Facebook-facing fetch service (finalplanv2 §4, §12)
+  # node — Facebook-facing fetch service (finalplanv2 §4, §12)
   # The only service allowed to talk to Facebook. Internal-only: no published
-  # ports; FastAPI will reach it at http://node-fetcher:9334 once the
+  # ports; FastAPI will reach it at http://node:9334 once the
   # fetch-client seam lands. It needs the `web` network for outbound
   # facebook.com traffic and the `isolated` network to reach the internal
   # redis (shared rate-limit state) — same dual-network shape as backend.
   # =====================================================================
-  node-fetcher:
+  node:
     build:
-      # Self-contained service: its Dockerfile assumes node-fetcher/ as the
+      # Self-contained service: its Dockerfile assumes node/ as the
       # build context (contra backend/frontend, whose docker/Dockerfile copies
       # relative to the repo root). package.json/lockfile/src all live here.
-      context: ../node-fetcher
+      context: ../node
       dockerfile: Dockerfile
       # Build-time DNS workaround — same disease as backend: the LAN resolver
       # returns AAAA-only answers for some CDNs (no IPv6 on this host), which
       # breaks `npm install` on the default bridge.
       network: host
-    image: postharvest-node-fetcher:latest
-    container_name: postharvest-node-fetcher
+    image: postharvest-node:latest
+    container_name: postharvest-node
     init: true
     # Same pinned DNS as backend/frontend (LAN router mangles external answers).
     dns:

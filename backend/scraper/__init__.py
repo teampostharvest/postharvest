@@ -307,7 +307,15 @@ def scrape_source(
             proxy_url=options.proxy_url,
         )
         try:
-            fetch = fetcher.fetch_page(normalized_url)
+            # finalplanv2 §14: when USE_NODE is on, HTTP-mode fetches
+            # are delegated to the node service (robots/throttle/retry
+            # happen there); the flag-off path below is byte-for-byte the
+            # legacy Fetcher. Parsing/normalization/dedup are identical for
+            # both paths.
+            if _node_enabled():
+                fetch = _node_fetch_page(normalized_url, cancel_event)
+            else:
+                fetch = fetcher.fetch_page(normalized_url)
             logger.info(
                 "Fetched %s variant=%s status=%s final_url=%s bytes=%d",
                 url, fetch.variant, fetch.status_code,
@@ -430,3 +438,21 @@ def _handle_of(normalized_url: str) -> Optional[str]:
     if segments[0] in ("profile.php", "people"):
         return None
     return segments[0]
+
+
+def _node_enabled() -> bool:
+    """True when HTTP-mode fetches should be delegated to node."""
+    from backend.core.config import get_settings
+    return get_settings().use_node
+
+
+def _node_fetch_page(normalized_url: str,
+                     cancel_event: Optional[threading.Event]):
+    """Fetch a page through the node service.
+
+    Lazy import keeps scraper -> services -> (scraper.fetcher/errors) from
+    forming a module-level cycle; the seam itself lives in
+    ``backend/services/node_fetch.py``.
+    """
+    from backend.services.node_fetch import fetch_page_via_node
+    return fetch_page_via_node(normalized_url, cancel_event=cancel_event)

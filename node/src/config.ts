@@ -1,5 +1,5 @@
 /**
- * Environment configuration for node-fetcher.
+ * Environment configuration for node.
  *
  * Names mirror the backend settings (backend/core/config.py) so both services
  * can be driven by the same deployment environment.

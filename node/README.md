@@ -1,4 +1,4 @@
-# node-fetcher
+# node
 
 The only service in PostHarvest that talks to Facebook (finalplanv2.md §4).
 
@@ -54,7 +54,7 @@ npm run build       # tsc -> dist/
 ## Contract flow
 
 ```
-FastAPI (Python) ──POST /fetch──▶ node-fetcher ──GET──▶ Facebook
+FastAPI (Python) ──POST /fetch──▶ node ──GET──▶ Facebook
                                ◀── FetchResponse ──
 ```
 

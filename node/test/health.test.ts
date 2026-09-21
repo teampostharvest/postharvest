@@ -22,7 +22,7 @@ describe("GET /healthz", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
       status: "ok",
-      service: "node-fetcher",
+      service: "node",
     });
     await app.close();
   });
