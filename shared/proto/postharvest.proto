@@ -1,0 +1,138 @@
+// postharvest.proto — canonical contract (single source of truth).
+//
+// Companion to plans/finalplanv2.md §6. This file defines the shapes the
+// three services agree on:
+//
+//   FastAPI (Python)  -- orchestration; the ONLY public surface
+//   node-fetcher (JS) -- the ONLY service that talks to Facebook
+//   go-worker (Go)    -- pure compute (parse / normalize / dedup / export)
+//
+// Phase 1 (build & stabilize) speaks plain HTTP + JSON. The JSON shapes used
+// on the wire are the literal proto3 field names below (null maps to the
+// proto3 default — see the field comments). Phase 2 swaps the transport to
+// gRPC generated from this file; the shapes themselves do not change.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// FIELD DISCIPLINE — READ BEFORE EDITING THIS FILE
+// Never renumber or reuse a field number. Only ever add new ones with the
+// next unused number. A field number change looks harmless in a diff but
+// silently breaks wire compatibility for every service that hasn't
+// redeployed yet — this is the single most common way a polyglot protobuf
+// setup breaks in production. If a field is no longer used, mark it
+// `reserved N;` instead of deleting or reusing its number.
+// ─────────────────────────────────────────────────────────────────────────
+
+syntax = "proto3";
+
+package postharvest;
+
+// ---------------------------------------------------------------------------
+// The 33-key canonical post — mirrors backend/scraper/normalizer.py
+// (NORMALIZED_KEYS). Field numbers 1..33 are locked to that key order.
+//
+// The canonical dict uses `null`/`[]` for missing values. proto3 has no null:
+//   * string fields -> empty string on the wire; JSON transport uses `null`.
+//   * int64 fields  -> 0 on the wire; JSON transport uses `null`.
+//   * repeated      -> empty list, exactly the canonical `[]`.
+// ---------------------------------------------------------------------------
+message Post {
+  // 1  post_id
+  string post_id = 1;
+  // 2  facebook_url — canonical page URL the post was scraped from
+  string facebook_url = 2;
+  // 3  post_url — direct link to the post, when derivable
+  string post_url = 3;
+  // 4  page_name
+  string page_name = 4;
+  // 5  page_id — numeric page id, when publicly derivable
+  string page_id = 5;
+  // 6  profile_url — the source is a page/profile URL by construction
+  string profile_url = 6;
+  // 7  post_type — "text" | "image" | "video" | "link" ("" == null)
+  string post_type = 7;
+  // 8  published_at — UTC ISO-8601 string ("" == null)
+  string published_at = 8;
+  // 9  timestamp — epoch seconds int (0 == null)
+  int64 timestamp = 9;
+  // 10 text — cleaned post message
+  string text = 10;
+  // 11 caption — ALWAYS null for public-HTML scrapes (never fabricated)
+  string caption = 11;
+  // 12 hashtags — ["#foo", "#bar"]
+  repeated string hashtags = 12;
+  // 13 mentions — ["@user"]
+  repeated string mentions = 13;
+  // 14 external_links
+  repeated string external_links = 14;
+  // 15 likes
+  int64 likes = 15;
+  // 16 reactions — explicit public total, else sum of the breakdown
+  int64 reactions = 16;
+  // 17 comments_count
+  int64 comments_count = 17;
+  // 18 shares
+  int64 shares = 18;
+  // 19 views_count
+  int64 views_count = 19;
+  // 20-26 per-reaction breakdown (0 == no data on page)
+  int64 reaction_like_count = 20;
+  int64 reaction_love_count = 21;
+  int64 reaction_care_count = 22;
+  int64 reaction_haha_count = 23;
+  int64 reaction_wow_count = 24;
+  int64 reaction_sad_count = 25;
+  int64 reaction_angry_count = 26;
+  // 27 media_type — "video" | "image" ("" == none)
+  string media_type = 27;
+  // 28-30 media URLs ("" == absent)
+  string thumbnail_url = 28;
+  string media_url = 29;
+  string video_url = 30;
+  // 31-32 transcripts — NEVER public on HTML pages (always "")
+  string transcript = 31;
+  string transcript_language = 32;
+  // 33 scraped_at — UTC ISO-8601 when the post was normalized
+  string scraped_at = 33;
+}
+
+// ---------------------------------------------------------------------------
+// FastAPI -> node-fetcher: fetch one Facebook page/profile URL.
+// ---------------------------------------------------------------------------
+message FetchRequest {
+  string target_url = 1;     // validated https://www.facebook.com/... URL
+  string mode = 2;           // "http" | "browser" ("browser" = Playwright)
+  string account_id = 3;     // saved session to use, if any ("" == none)
+}
+
+message FetchResponse {
+  int32 status_code = 1;     // HTTP status of the final response
+  string final_url = 2;      // URL after redirects
+  string content_type = 3;   // "text/html" | "application/json" (GraphQL)
+  bytes raw_payload = 4;     // raw body bytes, never interpreted here
+  int64 fetched_at_ms = 5;   // monotonic-ish capture timestamp
+}
+
+// ---------------------------------------------------------------------------
+// FastAPI -> go-worker: parse + normalize + dedup a raw payload into the
+// canonical Posts. Node and Go never hold a DB connection; FastAPI passes any
+// needed context in the request (finalplanv2.md §7).
+// ---------------------------------------------------------------------------
+message ParseRequest {
+  bytes raw_payload = 1;
+  string content_type = 2;   // "html" | "graphql_json"
+  string idempotency_key = 3; // job_id + ":" + source_id — finalplanv2.md §8(c)
+}
+
+message ParseResponse {
+  repeated Post posts = 1;
+  repeated string errors = 2;  // per-post parse failures, isolated (per-source fault isolation)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 gRPC surface. Phase 1 uses the same shapes over HTTP + JSON
+// (finalplanv2.md §6 — don't migrate transport and freeze schema at once).
+// ---------------------------------------------------------------------------
+service PostHarvest {
+  rpc Fetch(FetchRequest) returns (FetchResponse);
+  rpc Parse(ParseRequest) returns (ParseResponse);
+}
