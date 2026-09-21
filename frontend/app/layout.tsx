@@ -1,15 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import { Jost } from "next/font/google";
 import "./globals.css";
+import "motion-icons-react/style.css";
+import { generalSans, jetbrainsMono, satoshi } from "./fonts";
 import { ThemeProvider } from "@/components/common/ThemeProvider";
 import { AuthProvider } from "@/lib/auth-context";
-
-const jost = Jost({
-  subsets: ["latin"],
-  variable: "--font-jost",
-  weight: ["100", "200", "300", "400", "500", "600", "700"],
-  display: "swap",
-});
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
@@ -49,14 +43,18 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+    { media: "(prefers-color-scheme: light)", color: "#f7f5f0" },
+    { media: "(prefers-color-scheme: dark)", color: "#121110" },
   ],
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`light ${jost.variable}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`light ${generalSans.variable} ${satoshi.variable} ${jetbrainsMono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <ThemeProvider>
           <AuthProvider>{children}</AuthProvider>

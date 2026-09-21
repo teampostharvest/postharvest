@@ -37,6 +37,32 @@ class Base(DeclarativeBase):
     """Declarative base shared by all ORM models."""
 
 
+def postgres_pool_kwargs() -> dict:
+    """Connection-pool guardrails for PostgreSQL (Supabase pooler).
+
+    The shared session-mode pooler caps out at 15 clients TOTAL across every
+    backend using the DSN. This process stays far below that (3 pooled + 2
+    overflow = 5 max) and every wait is bounded: pool checkout fails after
+    10 s and individual TCP connects after 5 s. Without both bounds, a
+    saturated pooler wedged the whole API — uvicorn threads piled up behind
+    unbounded checkouts/connects until even /api/health stopped responding.
+    """
+    return {
+        "pool_size": 3,
+        "max_overflow": 2,
+        "pool_timeout": 10,
+        "pool_recycle": 300,
+        # Bound every wait: 5 s TCP connect, 15 s statements. A wedged
+        # server-side connection (stalled pooler slot) must die instead of
+        # pinning a pooled slot forever — pinned slots accumulate until the
+        # pool is exhausted and every route 500s.
+        "connect_args": {
+            "connect_timeout": 5,
+            "options": "-c statement_timeout=15000",
+        },
+    }
+
+
 def _build_engine() -> Engine:
     settings = get_settings()
     url = (settings.supabase_db_url or settings.database_url).strip()
@@ -57,7 +83,7 @@ def _build_engine() -> Engine:
             if raw_path:
                 Path(raw_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     elif url.startswith("postgresql"):
-        kwargs.update({"pool_size": 10, "max_overflow": 20})
+        kwargs.update(postgres_pool_kwargs())
     elif url.startswith("mysql"):
         kwargs.update({"pool_size": 10, "max_overflow": 20})
 

@@ -12,6 +12,7 @@ SHELL := /bin/bash
 
 DOCKER := docker compose
 PROD_FLAGS := -f docker-compose.yml -f docker-compose.prod.yml
+HOT_FLAGS := -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.hot.yml
 PROD_DIR := docker
 
 # Prefer the project venv (.venv) when present; fall back to system python.
@@ -79,6 +80,22 @@ prod-ps: ## List prod stack containers
 
 prod-health: ## Hit the prod health endpoint via nginx
 	curl -fsS http://localhost/api/health && echo
+
+
+# ============================================================================
+# Docker — hot-reload frontend inside the prod topology (nginx :443 + auth)
+# ============================================================================
+# Keeps nginx + hardened backend; swaps only the frontend to `next dev` with
+# ./frontend bind-mounted. Always browse https://localhost/ (same-origin /api).
+
+hot-up: ## Build + start hot-reload frontend (nginx + backend untouched)
+	cd $(PROD_DIR) && $(DOCKER) $(HOT_FLAGS) --profile prod up -d --build --no-deps frontend
+
+hot-off: ## Restore the static prod frontend (rebuilds nothing)
+	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile prod up -d --no-deps frontend
+
+hot-logs: ## Follow hot frontend logs
+	cd $(PROD_DIR) && $(DOCKER) $(HOT_FLAGS) --profile prod logs -f frontend
 
 
 # ============================================================================

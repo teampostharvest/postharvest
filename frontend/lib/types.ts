@@ -187,6 +187,44 @@ export const PLAN_LABELS: Record<string, string> = {
 
 export type PlanName = "basic" | "pro" | "team" | "enterprise";
 
+export const PLAN_IDS: PlanName[] = ["basic", "pro", "team", "enterprise"];
+
+/** Server-enforced limits for a tier (`null` = no per-plan ceiling). */
+export interface PlanLimits {
+  urls: number | null;
+  max_posts: number | null;
+  concurrent_jobs: number | null;
+  personal_accounts: number | null;
+}
+
+/** One entry from GET /api/plans (mirrors backend/core/plans.py). */
+export interface PlanCatalogEntry {
+  id: PlanName;
+  name: string;
+  limits: PlanLimits;
+}
+
+export type PlanCatalog = PlanCatalogEntry[];
+
+/** One used/limit pair from GET /api/usage (`null` limit = no ceiling). */
+export interface UsageLimit {
+  used: number;
+  limit: number | null;
+}
+
+/** Quota readout from GET /api/usage (mirrors backend/api/usage.py). */
+export interface UsageResponse {
+  plan: string;
+  jobs_running: UsageLimit;
+  personal_accounts: UsageLimit;
+  per_job: {
+    urls: number | null;
+    max_posts: number | null;
+  };
+  posts_today: number;
+  jobs_today: number;
+}
+
 /** User profile returned by GET /api/auth/me */
 export interface UserProfile {
   id: number;

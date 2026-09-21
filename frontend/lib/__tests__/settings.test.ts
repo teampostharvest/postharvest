@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EMPTY_DEFAULTS, readScrapeDefaults, writeScrapeDefaults, type ScrapeDefaults } from "@/lib/settings";
+import {
+  EMPTY_DEFAULTS,
+  readActiveAccount,
+  readScrapeDefaults,
+  writeActiveAccount,
+  writeScrapeDefaults,
+  type ScrapeDefaults,
+} from "@/lib/settings";
 
 const KEY = "postharvest-defaults";
 
@@ -66,5 +73,30 @@ describe("readScrapeDefaults / writeScrapeDefaults", () => {
       throw new Error("Quota exceeded");
     });
     expect(() => writeScrapeDefaults(EMPTY_DEFAULTS)).not.toThrow();
+  });
+});
+describe("readActiveAccount / writeActiveAccount", () => {
+  it("returns null when nothing was ever used", () => {
+    expect(readActiveAccount()).toBeNull();
+  });
+
+  it("round-trips the session spec of the active account", () => {
+    writeActiveAccount("ops:account-kz1");
+    expect(readActiveAccount()).toBe("ops:account-kz1");
+    expect(window.localStorage.getItem("postharvest-active-account")).toBe("ops:account-kz1");
+  });
+
+  it("clears the marker after an anonymous run", () => {
+    writeActiveAccount("me:personal");
+    writeActiveAccount(null);
+    expect(readActiveAccount()).toBeNull();
+    expect(window.localStorage.getItem("postharvest-active-account")).toBeNull();
+  });
+
+  it("migrates the legacy last-account key once", () => {
+    window.localStorage.setItem("postharvest-last-account", "me:personal");
+    expect(readActiveAccount()).toBe("me:personal");
+    writeActiveAccount("ops:account-kz1");
+    expect(window.localStorage.getItem("postharvest-last-account")).toBeNull();
   });
 });

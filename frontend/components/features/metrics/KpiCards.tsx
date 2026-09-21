@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { ApiErrorBanner } from "@/components/features/scraper/ApiErrorBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { Post } from "@/lib/types";
 import { formatCompact, formatNumber, pluralize } from "@/lib/utils";
 
@@ -33,7 +34,7 @@ interface Kpi {
   icon: typeof ThumbsUp;
 }
 
-const ICON_TONES = "bg-muted text-foreground";
+const ICON_TONES = "bg-bg-subtle text-ink-muted";
 
 export function KpiCards({ posts, total, capped, loading, error, onRetry }: KpiCardsProps) {
   const aggregates = useMemo(() => {
@@ -77,7 +78,7 @@ export function KpiCards({ posts, total, capped, loading, error, onRetry }: KpiC
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-4">
         <CardTitle>Results overview</CardTitle>
         {capped ? (
-          <p className="rounded-md border border-border bg-muted px-3 py-1 text-xs text-muted-foreground">
+          <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-1 text-xs text-danger">
             Aggregates shown for the first {formatNumber(posts.length)} posts, export for the full dataset
           </p>
         ) : null}
@@ -89,22 +90,22 @@ export function KpiCards({ posts, total, capped, loading, error, onRetry }: KpiC
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
             {loading
               ? Array.from({ length: 7 }).map((_, index) => (
-                  <div key={index} className="animate-pulse rounded-xl border bg-card p-4">
-                    <div className="h-8 w-8 rounded-lg bg-muted-foreground/15" />
-                    <div className="mt-3 h-6 w-14 rounded bg-muted-foreground/15" />
-                    <div className="mt-2 h-3 w-20 rounded bg-muted-foreground/10" />
+                  <div key={index} className="rounded-xl border bg-card p-4">
+                    <Skeleton className="h-8 w-8 rounded-lg" />
+                    <Skeleton className="mt-3 h-6 w-14" />
+                    <Skeleton className="mt-2 h-3 w-20" />
                   </div>
                 ))
               : kpis.map((kpi) => (
-                  <div key={kpi.label} className="rounded-lg border bg-card p-4 transition-colors hover:bg-muted/60">
+                  <div key={kpi.label} className="rounded-lg border bg-card p-4 transition-colors hover:bg-bg-subtle/60">
                     <div className={`inline-flex h-8 w-8 items-center justify-center rounded-md ${ICON_TONES}`}>
                       <kpi.icon className="h-4 w-4" aria-hidden="true" />
                     </div>
-                    <p className="mt-3 truncate text-2xl font-light tracking-tighter tabular-nums leading-7">{kpi.value}</p>
-                    <p className="mt-1 font-sans font-light text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    <p className="mt-3 truncate text-2xl font-light tracking-tighter tabular-nums leading-7 text-ink">{kpi.value}</p>
+                    <p className="mt-1 text-xs font-medium text-ink-muted">
                       {kpi.label}
                     </p>
-                    <p className="truncate font-sans text-[11px] font-light text-muted-foreground" title={kpi.caption}>
+                    <p className="truncate text-xs text-ink-muted" title={kpi.caption}>
                       {kpi.caption}
                     </p>
                   </div>

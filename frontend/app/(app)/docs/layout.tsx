@@ -7,7 +7,7 @@ import { DOCS_PAGES, findDocsPage } from "@/lib/docs-meta";
 import { cn } from "@/lib/utils";
 
 const SOURCE_FILES: ReadonlyArray<{ path: string; description: string }> = [
-  { path: "cli.py", description: "login · scrape · export from the shell" },
+  { path: "cli.py", description: "Login, scrape and export from the shell" },
   { path: "backend/main.py", description: "FastAPI app entry point" },
   { path: "backend/core/job_manager.py", description: "run lifecycle, ledger + progress TTL" },
   { path: "backend/api/scrape.py", description: "start / stop / inspect endpoints" },
@@ -24,15 +24,15 @@ const SOURCE_FILES: ReadonlyArray<{ path: string; description: string }> = [
 function DocsFileRail() {
   return (
     <aside className="hidden lg:block">
-      <div className="sticky top-0 border border-border bg-background">
-        <p className="border-b border-border px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+      <div className="sticky top-0 border border-border bg-bg">
+        <p className="border-b border-border px-4 py-2.5 text-xs font-medium text-ink-muted">
           Sources
         </p>
         <ul className="divide-y divide-border/60">
           {SOURCE_FILES.map((file) => (
             <li key={file.path} className="px-4 py-2.5">
-              <p className="truncate font-mono text-xs text-foreground">{file.path}</p>
-              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{file.description}</p>
+              <p className="truncate font-mono text-xs text-ink">{file.path}</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{file.description}</p>
             </li>
           ))}
         </ul>
@@ -55,13 +55,13 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const next = index >= 0 && index < DOCS_PAGES.length - 1 ? DOCS_PAGES[index + 1] : null;
 
   return (
-    <div className="animate-fade-in-up">
-      <nav className="mb-6 flex items-center gap-2 font-mono text-xs text-muted-foreground" aria-label="Breadcrumb">
-        <Link href="/docs" className="transition-colors hover:text-foreground">
-          docs
+    <div>
+      <nav className="mb-6 flex items-center gap-2 text-xs font-medium text-ink-muted" aria-label="Breadcrumb">
+        <Link href="/docs" className="transition-colors hover:text-ink">
+          Docs
         </Link>
         <span aria-hidden="true">/</span>
-        <span className="truncate text-foreground">{page?.title ?? "Documentation"}</span>
+        <span className="truncate text-ink">{page?.title ?? "Documentation"}</span>
       </nav>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_272px]">
@@ -77,12 +77,12 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           {prev ? (
             <Link
               href={`/docs/${prev.slug}`}
-              className="group border border-border px-3 py-3 transition-colors hover:border-foreground"
+              className="group border border-border px-3 py-3 transition-colors hover:border-ink"
             >
-              <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <ChevronLeft className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" /> prev
+              <span className="flex items-center gap-1 text-xs font-medium text-ink-muted">
+                <ChevronLeft className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" /> Previous
               </span>
-              <span className="mt-1.5 block truncate text-sm font-medium text-foreground">{prev.title}</span>
+              <span className="mt-1.5 block truncate text-sm font-medium text-ink">{prev.title}</span>
             </Link>
           ) : (
             <span />
@@ -91,14 +91,14 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             <Link
               href={`/docs/${next.slug}`}
               className={cn(
-                "group border border-border px-3 py-3 text-right transition-colors hover:border-foreground",
+                "group border border-border px-3 py-3 text-right transition-colors hover:border-ink",
                 !prev && "sm:col-start-2",
               )}
             >
-              <span className="flex items-center justify-end gap-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                next <ChevronRight className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+              <span className="flex items-center justify-end gap-1 text-xs font-medium text-ink-muted">
+                Next <ChevronRight className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
               </span>
-              <span className="mt-1.5 block truncate text-sm font-medium text-foreground">{next.title}</span>
+              <span className="mt-1.5 block truncate text-sm font-medium text-ink">{next.title}</span>
             </Link>
           ) : (
             <span />

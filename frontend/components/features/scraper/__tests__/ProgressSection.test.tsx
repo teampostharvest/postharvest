@@ -83,3 +83,27 @@ describe("formatEta (D13, Q7-A)", () => {
     expect(formatEta(-5)).toBe("0m 0s");
   });
 });
+describe("ProgressSection titles", () => {
+  it("shows a loading title while the job has not arrived yet", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const { ProgressSection } = await import("@/components/features/scraper/ProgressSection");
+    render(<ProgressSection active={true} job={null} error={null} onRetry={() => {}} />);
+    expect(screen.getByText("Loading run")).toBeInTheDocument();
+    expect(screen.queryByText("Scraping in progress")).not.toBeInTheDocument();
+  });
+
+  it("shows a completed title for finished runs, never in-progress", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const { ProgressSection } = await import("@/components/features/scraper/ProgressSection");
+    render(
+      <ProgressSection
+        active={false}
+        job={makeJob({ status: "completed", pages_completed: 1, posts_processed: 100 })}
+        error={null}
+        onRetry={() => {}}
+      />
+    );
+    expect(screen.getByText("Run complete")).toBeInTheDocument();
+    expect(screen.queryByText("Scraping in progress")).not.toBeInTheDocument();
+  });
+});

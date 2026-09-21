@@ -21,11 +21,11 @@ export function Progress({ value, max = 100, indeterminate = false, className, i
       aria-valuemax={max}
       aria-valuenow={isIndeterminate ? undefined : Math.round(percent)}
       aria-label="Job progress"
-      className={cn("relative h-2.5 w-full overflow-hidden rounded-full bg-muted", className)}
+      className={cn("relative h-2.5 w-full overflow-hidden rounded-full bg-bg-subtle", className)}
     >
       <div
         className={cn(
-          "h-full rounded-full bg-foreground transition-[width] duration-500 ease-out",
+          "h-full rounded-full bg-accent transition-[width] duration-500 ease-out",
           isIndeterminate ? "w-1/3 animate-indeterminate" : "progress-stripes",
           indicatorClassName
         )}

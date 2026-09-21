@@ -2,7 +2,7 @@
 
 * GET    /api/admin/users           — list all users (id, email, plan, role, …)
 * PATCH  /api/admin/users/{id}/role — promote/demote between user/ops
-* PATCH  /api/admin/users/{id}/plan — set Basic/Pro/Enterprise tier
+* PATCH  /api/admin/users/{id}/plan — set Basic/Pro/Team/Enterprise tier
 
 Every route is gated by :func:`require_ops` (403 ``admin_required`` for
 regular users). An operator cannot demote themselves, to avoid accidentally
@@ -48,7 +48,7 @@ class RoleUpdate(BaseModel):
 
 
 class PlanUpdate(BaseModel):
-    plan: Literal["basic", "pro", "enterprise"] = Field(..., description="New tier")
+    plan: Literal["basic", "pro", "team", "enterprise"] = Field(..., description="New tier")
 
 
 @router.get(

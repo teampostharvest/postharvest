@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, FileX2, Link2, MapPin, RefreshCcw } from "lucide-react";
+import { AlertTriangle, FileX2, MapPin, RefreshCcw } from "lucide-react";
+import { MotionIcon } from "motion-icons-react";
 import { ApiErrorBanner } from "@/components/features/scraper/ApiErrorBanner";
 import { Button } from "@/components/ui/button";
 import { safeHttpUrl, type ApiError } from "@/lib/api";
@@ -153,26 +154,24 @@ export function formatEta(seconds: number): string {
 }
 
 const SOURCE_STATUS_STYLES: Record<string, string> = {
-  queued: "bg-neutral-300",
-  running: "bg-emerald-500 animate-pulse",
-  completed: "bg-black",
-  failed: "bg-red-600",
-  cancelled: "bg-neutral-400",
+  queued: "bg-ink-faint/60",
+  running: "bg-accent animate-pulse",
+  completed: "bg-ink",
+  failed: "bg-danger",
+  cancelled: "bg-ink-faint/60",
 };
 
 function SourceRow({ source }: { source: SourceProgress }) {
-  const dotClass = SOURCE_STATUS_STYLES[source.status] ?? "bg-neutral-300";
+  const dotClass = SOURCE_STATUS_STYLES[source.status] ?? "bg-ink-faint/60";
   const label = source.status.length > 0 ? source.status.charAt(0).toUpperCase() + source.status.slice(1) : "Queued";
   return (
     <li className="flex items-center gap-2 py-0.5">
       <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate font-sans font-light text-[11px] text-neutral-600" title={source.url}>
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-muted" title={source.url}>
         {source.url}
       </span>
-      <span className="shrink-0 font-sans font-light text-[9px] uppercase tracking-[0.12em] text-neutral-400">
-        {label}
-      </span>
-      <span className="shrink-0 font-sans font-normal text-[10px] tabular-nums text-neutral-500">
+      <span className="shrink-0 text-xs font-medium text-ink-muted">{label}</span>
+      <span className="shrink-0 font-mono text-xs tabular-nums text-ink-muted">
         {formatNumber(source.posts_processed)} / {formatNumber(source.posts_found)}
       </span>
     </li>
@@ -182,15 +181,15 @@ function SourceRow({ source }: { source: SourceProgress }) {
 function ErrorListItem({ entry }: { entry: JobErrorDetail }) {
   const link = safeHttpUrl(entry.url ?? entry.post_url);
   return (
-    <li className="border border-neutral-200 bg-neutral-50 p-3">
+    <li className="border border-border bg-bg-subtle/50 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="border border-red-700/60 px-1.5 py-0.5 font-sans font-light text-[10px] uppercase tracking-[0.2em] text-red-700">
+        <span className="rounded-sm border border-danger/40 bg-danger/10 px-1.5 py-0.5 font-mono text-xs text-danger">
           {entry.code}
         </span>
-        <span className="min-w-0 flex-1 wrap-break-word font-sans text-sm text-neutral-700">{entry.message}</span>
+        <span className="min-w-0 flex-1 wrap-break-word text-sm text-ink">{entry.message}</span>
       </div>
       {link ? (
-        <p className="mt-1 truncate font-sans font-light text-[11px] text-neutral-500">
+        <p className="mt-1 truncate text-xs text-ink-muted">
           <MapPin className="mr-1 inline h-3 w-3" aria-hidden="true" />
           {entry.post_url ?? entry.url}
         </p>
@@ -227,16 +226,24 @@ export function ProgressSection({ active, job, error, onRetry }: ProgressSection
     return rows;
   }, [job]);
 
-  const title = failed ? "Scraping failed" : queued ? "Job queued" : "Scraping in progress";
+  const title = !job
+    ? "Loading run"
+    : failed
+      ? "Scraping failed"
+      : queued
+        ? "Job queued"
+        : job.status === "completed"
+          ? "Run complete"
+          : "Scraping in progress";
   const sources = job?.sources ?? [];
 
   const bar = percent != null ? (
-    <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label="Job progress" className="relative h-1 w-full overflow-hidden bg-neutral-100">
-      <div className={cn("h-full bg-black transition-[width] duration-500 ease-out progress-stripes", failed && "bg-red-600")} style={{ width: `${percent}%` }} />
+    <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label="Job progress" className="h-1.5 w-full overflow-hidden rounded-full bg-bg-subtle">
+      <div className={cn("h-full rounded-full transition-[width] duration-500 ease-out", failed ? "bg-danger" : "bg-ink progress-stripes")} style={{ width: `${percent}%` }} />
     </div>
   ) : (
-    <div role="progressbar" aria-label="Job progress" className="relative h-1 w-full overflow-hidden bg-neutral-100">
-      <div className="h-full w-1/3 animate-indeterminate bg-black" />
+    <div role="progressbar" aria-label="Job progress" className="h-1.5 w-full overflow-hidden rounded-full bg-bg-subtle">
+      <div className="h-full w-1/3 animate-indeterminate rounded-full bg-ink" />
     </div>
   );
 
@@ -246,67 +253,70 @@ export function ProgressSection({ active, job, error, onRetry }: ProgressSection
         <ApiErrorBanner variant="warning" title="API unreachable" message={`${error?.message ?? "Cannot reach the backend."} The job keeps running server-side; reconnecting will resume updates.`} onRetry={onRetry} retryLabel="Retry now" />
       ) : null}
 
-      <section className="border border-neutral-200 bg-white text-neutral-700" aria-label="Scraping monitor">
-        {bar}
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm" aria-label="Scraping monitor">
+        <div className="px-5 pt-4">{bar}</div>
 
-        <div className="flex items-center justify-between gap-4 px-4 py-2 border-b border-neutral-100">
-          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+        <div className="flex items-center justify-between gap-4 px-5 pb-4 pt-3">
+          <div className="flex min-w-0 items-center gap-2.5">
             {failed ? (
-              <AlertTriangle className="h-3 w-3 shrink-0 text-red-600" aria-hidden="true" />
+              <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
             ) : (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-600 animate-pulse-dot" aria-hidden="true" />
+              <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+                <span className="absolute h-full w-full rounded-full bg-accent opacity-60 animate-pulse-dot" />
+                <span className="h-2 w-2 rounded-full bg-accent" />
+              </span>
             )}
-            <span className="font-sans font-light text-[10px] uppercase tracking-[0.2em] text-neutral-500 whitespace-nowrap">{title}</span>
+            <span className="truncate text-sm font-medium text-ink">{title}</span>
             {job?.job_id ? (
-              <span className="font-sans font-light text-[10px] uppercase tracking-[0.2em] text-neutral-400 tabular-nums whitespace-nowrap">
-                · job {job.job_id.slice(0, 8)}
+              <span className="shrink-0 rounded-full bg-bg-subtle px-2 py-0.5 font-mono text-xs tabular-nums text-ink-muted">
+                job {job.job_id.slice(0, 8)}
               </span>
             ) : null}
             {showConnectionLoss ? (
-              <span className="font-sans font-light text-[10px] uppercase tracking-[0.2em] text-amber-500 whitespace-nowrap">
-                · connection lost, retrying…
+              <span className="shrink-0 whitespace-nowrap text-xs font-medium text-warning">
+                Connection lost, retrying…
               </span>
             ) : null}
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex shrink-0 items-center gap-3">
             {active && !showConnectionLoss && job?.status === "running" ? (
-              <span className="flex items-center gap-1 font-sans font-light text-[9px] uppercase tracking-[0.15em] text-neutral-400">
-                <span className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-                live
+              <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+                <span className="h-1 w-1 rounded-full bg-success animate-pulse" aria-hidden="true" />
+                Live
               </span>
             ) : null}
             {etaSeconds != null ? (
               // Q13-A: ETA sits immediately to the left of the percentage.
-              <span className="font-sans font-normal text-[9px] text-neutral-500 tabular-nums" title="Estimated time remaining">
+              <span className="font-mono text-xs tabular-nums text-ink-muted" title="Estimated time remaining">
                 {formatEta(etaSeconds)}
               </span>
             ) : null}
             {percent != null ? (
-              <span className={cn("font-sans text-base font-semibold tracking-tighter tabular-nums leading-none", failed ? "text-red-600" : "text-black")}>
+              <span className={cn("font-mono text-2xl font-semibold tabular-nums leading-none", failed ? "text-danger" : "text-ink")}>
                 {percent}%
               </span>
+            ) : job == null ? (
+              <span className="text-xs text-ink-muted">Loading</span>
             ) : queued ? (
-              <span className="font-sans font-light text-[10px] uppercase tracking-[0.2em] text-neutral-400">queued</span>
+              <span className="text-xs font-medium text-ink-muted">Queued</span>
             ) : (
-              <span className="font-sans font-light text-[10px] uppercase tracking-[0.2em] text-neutral-400">starting…</span>
+              <span className="text-xs text-ink-muted">Starting</span>
             )}
           </div>
         </div>
 
         {sources.length > 0 ? (
           // Q4-A / Q12-A: links box on top of the progress section, inline and scrollable.
-          <div className="border-b border-neutral-100 px-4 py-2" aria-label="Links being scraped">
-            <div className="mb-1 flex items-center gap-2">
-              <Link2 className="h-3 w-3 text-neutral-400" aria-hidden="true" />
-              <span className="font-sans font-light text-[9px] uppercase tracking-[0.2em] text-neutral-400">
-                Links being scraped
-              </span>
-              <span className="font-sans font-light text-[9px] uppercase tracking-[0.2em] text-neutral-300 tabular-nums">
-                ({formatNumber(sources.length)})
+          <div className="border-t border-border px-5 py-3" aria-label="Links being scraped">
+            <div className="mb-1.5 flex items-center gap-2">
+              <MotionIcon name="Link2" size={13} aria-hidden="true" />
+              <span className="text-xs font-medium text-ink-muted">Links being scraped</span>
+              <span className="rounded-full bg-bg-subtle px-1.5 py-px font-mono text-xs tabular-nums text-ink-muted">
+                {formatNumber(sources.length)}
               </span>
             </div>
-            <ul className="max-h-20 space-y-0.5 overflow-y-auto pr-1">
+            <ul className="max-h-28 space-y-1 overflow-y-auto pr-1">
               {sources.map((source) => (
                 <SourceRow key={source.url} source={source} />
               ))}
@@ -315,33 +325,39 @@ export function ProgressSection({ active, job, error, onRetry }: ProgressSection
         ) : null}
 
         {stats.length > 0 ? (
-          <div className="flex flex-wrap items-stretch divide-x divide-neutral-100">
+          <div className="flex flex-wrap items-stretch divide-x divide-border border-t border-border bg-bg-subtle/40">
             {stats.map((stat) => (
-              <div key={stat.label} className="flex flex-col items-center justify-center px-4 py-2.5 flex-1 min-w-[72px]">
-                <span className={cn("font-sans text-sm font-semibold tabular-nums leading-none", stat.danger ? "text-red-600" : "text-neutral-900")}>
+              <div key={stat.label} className="flex min-w-[84px] flex-1 flex-col items-center justify-center gap-1 px-4 py-3">
+                <span className={cn("font-mono text-lg font-semibold tabular-nums leading-none", stat.danger ? "text-danger" : "text-ink")}>
                   {stat.value}
                 </span>
-                <span className="font-sans font-light text-[9px] uppercase tracking-[0.12em] text-neutral-400 mt-1 whitespace-nowrap">
-                  {stat.label}
-                </span>
+                <span className="whitespace-nowrap text-xs text-ink-muted">{stat.label}</span>
               </div>
             ))}
-            <div className="flex flex-col items-center justify-center px-4 py-2.5 min-w-[80px]">
-              <span className="font-sans font-light text-[9px] uppercase tracking-[0.12em] text-neutral-400 whitespace-nowrap">
-                {active ? "inputs locked" : "waiting"}
+            <div className="flex min-w-[80px] flex-col items-center justify-center gap-1 px-4 py-3">
+              <MotionIcon
+                name={active ? "LoaderCircle" : "Clock"}
+                size={15}
+                aria-hidden="true"
+                animation={active ? "spin" : "none"}
+                trigger={active ? "always" : "hover"}
+                className="text-ink-muted"
+              />
+              <span className="whitespace-nowrap text-xs text-ink-muted">
+                {active ? "Inputs locked" : "Waiting"}
               </span>
             </div>
           </div>
         ) : null}
 
         {failed && job?.error_details && job.error_details.length > 0 ? (
-          <div className="space-y-2 border-t border-neutral-200 px-4 py-3">
+          <div className="space-y-2 border-t border-border px-5 py-4">
             <div className="flex items-center justify-between gap-3">
-              <h4 className="font-sans text-xs font-semibold text-neutral-900">
-                <FileX2 className="mr-1.5 inline h-3.5 w-3.5 text-red-600" aria-hidden="true" />
+              <h4 className="text-xs font-semibold text-ink">
+                <FileX2 className="mr-1.5 inline h-3.5 w-3.5 text-danger" aria-hidden="true" />
                 Error details ({job.error_details.length})
               </h4>
-              <Button variant="outline" size="sm" onClick={onRetry} className="rounded-none border-neutral-200 bg-transparent text-neutral-600 hover:bg-neutral-100 hover:text-black">
+              <Button variant="outline" size="sm" onClick={onRetry} className="rounded-none border-border bg-transparent text-ink-muted hover:bg-bg-subtle hover:text-ink">
                 <RefreshCcw className="mr-1.5 h-3 w-3" aria-hidden="true" /> Refresh
               </Button>
             </div>

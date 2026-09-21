@@ -12,16 +12,18 @@ export type BadgeVariant =
   | "purple"
   | "amber";
 
+/** Small tag/flag chips (grid badges, tier markers). For job/account status
+ *  indicators use `StatusBadge`. Kept on the palette via the canonical tokens. */
 const variantClasses: Record<BadgeVariant, string> = {
   default: "border-border bg-secondary text-secondary-foreground",
   secondary: "border-border bg-muted text-muted-foreground",
   outline: "border-border text-muted-foreground bg-transparent",
   destructive: "bg-foreground text-background border-transparent",
-  success: "border-border bg-muted text-foreground",
-  warning: "border-border bg-muted text-foreground",
-  blue: "border-border bg-muted text-muted-foreground",
-  purple: "border-border bg-muted text-muted-foreground",
-  amber: "border-border bg-muted text-muted-foreground",
+  success: "border-border bg-success-bg text-success",
+  warning: "border-border bg-warning-bg text-warning",
+  blue: "border-border bg-bg-subtle text-ink-muted",
+  purple: "border-border bg-bg-subtle text-ink-muted",
+  amber: "border-border bg-bg-subtle text-ink-muted",
 };
 
 export function Badge({

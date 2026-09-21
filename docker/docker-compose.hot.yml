@@ -1,0 +1,56 @@
+# docker-compose.hot.yml — LOCAL hot-reload frontend INSIDE the prod topology.
+#
+# Usage (run from docker/):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#       -f docker-compose.hot.yml --profile prod up -d --build --no-deps frontend
+#
+# What it does:
+#   * keeps nginx (:80/:443) + the hardened backend exactly as prod runs them
+#   * swaps ONLY the frontend to the `frontend-dev` target (`next dev`) with
+#     ./frontend bind-mounted, so edits hot-reload instantly
+#   * NEXT_PUBLIC_API_URL stays empty (= same-origin /api/* via nginx), so auth
+#     and all API calls behave exactly like production — no mixed-content, no
+#     extra CORS origins. Always use https://localhost/ (NOT :3000 directly).
+#
+# Notes:
+#   * `--no-deps` matters: the local backend container is the -dev image, which
+#     differs from the prod-file definition — without it compose would try to
+#     recreate the backend too.
+#   * HMR websocket (/_next/webpack-hmr) rides through nginx's location / block,
+#     which already forwards Upgrade headers.
+#   * node_modules/.next live in named volumes so the host tree stays clean;
+#     Docker populates them from the image on first creation.
+#   * Next dev is heavier than `next start`: the mem cap is raised to 1g and
+#     npm's cache is pointed at /tmp (tmpfs) because the prod layer mounts the
+#     rootfs read-only.
+#   * Never use this file in production.
+
+services:
+  frontend:
+    build:
+      target: frontend-dev
+    image: postharvest-frontend-dev:latest
+    # Run as uid 1000 (node = host user): the prod layer drops ALL
+    # capabilities (incl. CAP_DAC_OVERRIDE), so root inside the container
+    # cannot write the uid-1000-owned bind mount (next-env.d.ts regen
+    # fails with EACCES). As node, the bind mount, the tmpfs /tmp and the
+    # chowned cache volumes below are all writable. Never use in production.
+    # NOTE: if these two volumes are ever deleted, Docker repopulates them
+    # root-owned from the image — re-run:
+    #   sudo chown -R 1000:1000 /var/lib/docker/volumes/postharvest_frontend-{node-modules,next-cache}/_data
+    user: "1000:1000"
+    volumes:
+      - ../frontend:/app
+      - frontend-node-modules:/app/node_modules
+      - frontend-next-cache:/app/.next
+    environment:
+      # Empty = same-origin API_BASE (frontend/lib/api.ts), i.e. nginx /api/*.
+      NEXT_PUBLIC_API_URL: ""
+      NEXT_PUBLIC_SITE_URL: https://localhost
+      NPM_CONFIG_CACHE: /tmp/npm-cache
+    mem_limit: 1g
+
+volumes:
+  frontend-node-modules:
+  frontend-next-cache:

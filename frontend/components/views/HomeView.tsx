@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MotionIcon } from "motion-icons-react";
 import { isFacebookUrl } from "@/lib/api";
 
 export interface HomeViewProps {
@@ -31,17 +32,17 @@ export function HomeView({ onTrace, onAdvanced }: HomeViewProps) {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-8 pt-24">
-      <h1 className="mb-6 font-sans text-6xl font-semibold tracking-tighter text-black leading-tight md:text-7xl">
+      <h1 className="mb-6 font-display text-3xl font-semibold tracking-tight text-ink leading-tight">
         Facebook scraping,
         <br />
         fully automated.
       </h1>
-      <p className="mb-12 max-w-2xl font-sans font-light text-[#3a3e43] text-[19px] leading-[29px]">
+      <p className="mb-12 max-w-2xl text-lg leading-relaxed text-ink-muted">
         Drop a target URL. The system automatically scrapes public feeds, profiles, and media, folding every hit into a
         structured JSON report.
       </p>
 
-      <div className="flex w-full max-w-4xl border border-black bg-white">
+      <div className="flex w-full max-w-4xl items-stretch rounded-lg border border-border-strong bg-bg-elevated shadow-sm">
         <input
           id="master-url"
           type="text"
@@ -56,26 +57,28 @@ export function HomeView({ onTrace, onAdvanced }: HomeViewProps) {
           placeholder="https://www.facebook.com/target..."
           autoComplete="off"
           spellCheck={false}
-          className="min-w-0 flex-1 bg-transparent px-6 py-5 font-mono text-sm text-black placeholder:text-neutral-400 focus:outline-hidden"
+          className="min-w-0 flex-1 bg-transparent px-6 py-5 font-mono text-sm text-ink placeholder:text-ink-faint focus:outline-hidden"
         />
         <button
           type="button"
           onClick={submit}
-          className="whitespace-nowrap bg-black px-10 py-5 font-mono text-sm text-white transition-colors hover:bg-neutral-800"
+          aria-label="Scrape target"
+          className="btn-sheen flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-r-full bg-accent px-8 text-sm font-medium text-accent-ink transition-all duration-200 hover:bg-accent-hover hover:shadow-lg active:scale-[0.98]"
         >
-          Scrape Target
+          <MotionIcon name="Play" size={16} aria-hidden="true" animation="pop" trigger="hover" />
+          <span>Scrape target</span>
         </button>
       </div>
 
-      <p className="mt-3 min-h-[1em] font-mono text-xs text-red-700" aria-live="polite">
+      <p className="mt-3 min-h-[1em] text-xs text-danger" aria-live="polite">
         {validationError}
       </p>
 
       <button
         type="button"
         onClick={onAdvanced}
-        className={`mt-4 block font-sans font-light text-[10px] uppercase tracking-widest text-highlight transition-colors ${
-          onAdvanced ? "cursor-pointer hover:text-black" : "cursor-default"
+        className={`mt-4 block text-sm font-medium text-highlight transition-colors ${
+          onAdvanced ? "cursor-pointer hover:text-ink" : "cursor-default"
         }`}
       >
         Or just do it in batch →

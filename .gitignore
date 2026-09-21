@@ -77,4 +77,5 @@ inspo/
 # Firebase service account credentials
 serviceAccountKey.json
 *firebase-adminsdk*.json
-
+fonts/**
+/plans/**.md

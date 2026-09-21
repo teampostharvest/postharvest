@@ -7,7 +7,9 @@ describe("Display Primitives", () => {
     render(<Eyebrow>Overview</Eyebrow>);
     const el = screen.getByText("Overview");
     expect(el).toBeInTheDocument();
-    expect(el).toHaveClass("uppercase");
+    // §3.3 type ramp: sentence-case micro-label, accent gold, no tracked caps.
+    expect(el).toHaveClass("text-xs", "font-semibold", "text-highlight");
+    expect(el).not.toHaveClass("uppercase");
   });
 
   it("renders PageHeading as an h1", () => {
