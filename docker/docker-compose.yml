@@ -183,6 +183,49 @@ services:
     networks:
       - web
 
+  # =====================================================================
+  # node-fetcher — Facebook-facing fetch service (finalplanv2 §4, §12)
+  # The only service allowed to talk to Facebook. Internal-only: no published
+  # ports; FastAPI will reach it at http://node-fetcher:9334 once the
+  # fetch-client seam lands. It needs the `web` network for outbound
+  # facebook.com traffic and the `isolated` network to reach the internal
+  # redis (shared rate-limit state) — same dual-network shape as backend.
+  # =====================================================================
+  node-fetcher:
+    build:
+      # Self-contained service: its Dockerfile assumes node-fetcher/ as the
+      # build context (contra backend/frontend, whose docker/Dockerfile copies
+      # relative to the repo root). package.json/lockfile/src all live here.
+      context: ../node-fetcher
+      dockerfile: Dockerfile
+      # Build-time DNS workaround — same disease as backend: the LAN resolver
+      # returns AAAA-only answers for some CDNs (no IPv6 on this host), which
+      # breaks `npm install` on the default bridge.
+      network: host
+    image: postharvest-node-fetcher:latest
+    container_name: postharvest-node-fetcher
+    init: true
+    # Same pinned DNS as backend/frontend (LAN router mangles external answers).
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      # Shared rate-limit store; the service degrades to in-process buckets on
+      # a Redis outage (never hard-blocks fetching).
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SCRAPER_DELAY_SECONDS: ${SCRAPER_DELAY_SECONDS:-2.5}
+      SCRAPER_TIMEOUT_SECONDS: ${SCRAPER_TIMEOUT_SECONDS:-20}
+      SCRAPER_MAX_RETRIES: ${SCRAPER_MAX_RETRIES:-3}
+      SCRAPER_ROBOTS: ${SCRAPER_ROBOTS:-1}
+    # Intentionally NO depends_on redis: this branch's compose predates the
+    # redis/worker services (PR #54 adds them to this file). The fetcher
+    # tolerates a missing Redis, so merge order between the two PRs is free.
+    restart: unless-stopped
+    stop_grace_period: 10s
+    networks:
+      - web
+      - isolated
+
 volumes:
   certbot-www:
   certbot-conf:

@@ -49,6 +49,17 @@ services:
     mem_limit: ${FRONTEND_MEM_LIMIT:-512m}
     cpus: ${FRONTEND_CPUS:-1.0}
 
+  node-fetcher:
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${NODE_FETCHER_MEM_LIMIT:-256m}
+    cpus: ${NODE_FETCHER_CPUS:-0.5}
+
   nginx:
     read_only: true
     tmpfs:
