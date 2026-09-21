@@ -16,7 +16,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.auth.dependencies import get_current_user
-from backend.core import job_state
+from backend.core import cache, job_state
 from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.core.exceptions import AppError, InvalidInputError, NotFoundError
@@ -265,6 +265,7 @@ def delete_job(
         )
     )
     db.commit()
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return Response(status_code=204)
 
 
@@ -290,6 +291,7 @@ def pause_job(
     job.status = "paused"
     job_state.set_status(job.id, "paused")  # Redis mirror (finalplanv2 §8b)
     db.commit()
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return {"job_id": job.id, "status": "paused"}
 
 
@@ -322,4 +324,5 @@ def resume_job(
     from backend.services.job_service import run_scrape_job
 
     JobManager.get().submit(job.id, run_scrape_job)
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return {"job_id": job.id, "status": "queued"}

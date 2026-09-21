@@ -10,10 +10,21 @@ from __future__ import annotations
 
 import backend.core.database as dbmod
 
+SESSION_URL = "postgresql+psycopg://user:pass@localhost:5432/postgres"
+TRANSACTION_URL = "postgresql+psycopg://user:pass@localhost:6543/postgres"
+
 
 def _settings_with_postgres(monkeypatch) -> None:
     class _Settings:
-        supabase_db_url = "postgresql+psycopg://user:pass@localhost:5432/postgres"
+        supabase_db_url = SESSION_URL
+        database_url = "sqlite:///./data/postharvest.db"
+
+    monkeypatch.setattr(dbmod, "get_settings", lambda: _Settings())
+
+
+def _settings_with_transaction_pooler(monkeypatch) -> None:
+    class _Settings:
+        supabase_db_url = TRANSACTION_URL
         database_url = "sqlite:///./data/postharvest.db"
 
     monkeypatch.setattr(dbmod, "get_settings", lambda: _Settings())
@@ -31,7 +42,7 @@ def test_postgres_pool_capped_below_shared_pooler_ceiling(monkeypatch):
 
 def test_postgres_pool_waits_are_all_bounded(monkeypatch):
     _settings_with_postgres(monkeypatch)
-    kwargs = dbmod.postgres_pool_kwargs()
+    kwargs = dbmod.postgres_pool_kwargs(SESSION_URL)
     assert kwargs["pool_timeout"] <= 10
     assert kwargs["pool_recycle"] > 0
     # TCP connects must fail fast too — otherwise a stalled pooler hangs
@@ -45,3 +56,45 @@ def test_postgres_pool_waits_are_all_bounded(monkeypatch):
         assert engine.pool._recycle > 0
     finally:
         engine.dispose()
+
+
+def test_transaction_pooler_detection_is_port_based():
+    assert dbmod.is_transaction_pooler(TRANSACTION_URL) is True
+    assert dbmod.is_transaction_pooler(SESSION_URL) is False
+    assert dbmod.is_transaction_pooler("sqlite:///./data/postharvest.db") is False
+    assert dbmod.is_transaction_pooler("not-a-url") is False
+
+
+def test_transaction_pooler_disables_prepared_statements(monkeypatch):
+    """Supavisor transaction mode swaps backend connections between statements.
+
+    Server-side prepared statements cannot survive that, so psycopg must be
+    told not to prepare (``prepare_threshold=None``); the client pool is larger
+    than the session-mode one but still capped below the pooler's own
+    server-side pool so bursts queue locally instead of erroring.
+    """
+    _settings_with_transaction_pooler(monkeypatch)
+    kwargs = dbmod.postgres_pool_kwargs(TRANSACTION_URL)
+    assert kwargs["connect_args"]["prepare_threshold"] is None
+    # Client pool must stay below Supavisor's server-side pool (~15) or bursts
+    # trip its ECHECKOUTTIMEOUT instead of queueing locally.
+    total = kwargs["pool_size"] + kwargs["max_overflow"]
+    assert 5 < total <= 15, f"transaction pool can hold {total} concurrent txns"
+    assert kwargs["pool_timeout"] <= 10
+    assert kwargs["connect_args"]["connect_timeout"] <= 5
+
+    engine = dbmod._build_engine()
+    try:
+        assert engine.pool._pool.maxsize == kwargs["pool_size"]
+        assert engine.pool._timeout <= 10
+    finally:
+        engine.dispose()
+
+
+def test_migrations_run_on_session_mode_not_the_transaction_pooler():
+    migrated = dbmod.session_url_for_migrations(TRANSACTION_URL)
+    assert migrated == "postgresql+psycopg://user:pass@localhost:5432/postgres"
+
+    # Session/direct and sqlite URLs are passed through untouched.
+    assert dbmod.session_url_for_migrations(SESSION_URL) == SESSION_URL
+    assert dbmod.session_url_for_migrations("sqlite:///x.db") == "sqlite:///x.db"

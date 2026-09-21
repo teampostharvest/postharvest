@@ -46,7 +46,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.core.config import get_settings
 from backend.core.database import SessionLocal
 from backend.core.exceptions import AppError, InvalidInputError
-from backend.core import job_state
+from backend.core import cache, job_state
 from backend.core.job_manager import CancelToken, JobManager
 from backend.core.logging import get_logger
 from backend.models.engagement_metrics import EngagementMetric
@@ -357,6 +357,7 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
 
     job_manager.submit(job_id, run_scrape_job)
     job_state.set_status(job_id, "queued")  # Redis mirror (finalplanv2 §8b)
+    cache.invalidate_usage(owner_id)  # quota readout changed (active jobs +1)
     logger.info(
         "Job %s queued: %d source(s) valid (%s), %d invalid URL(s)",
         job_id,
@@ -600,6 +601,7 @@ def _finalize(job_id: str, token: CancelToken | None) -> None:
         if job is None:
             return
 
+        owner_id = job.owner_id
         cancelled = (token is not None and token.cancelled) or bool(
             job.cancel_requested
         )
@@ -654,6 +656,7 @@ def _finalize(job_id: str, token: CancelToken | None) -> None:
     # Redis mirror for the terminal status (finalplanv2 §8b). The mirror key
     # stays put so replicas can read a terminal job without hitting the DB.
     job_state.set_status(job_id, "failed" if cancelled else "completed")
+    cache.invalidate_usage(owner_id)  # quota readout changed (job terminal)
 
 
 def _finalize_failure(job_id: str, code: str, message: str) -> None:
@@ -661,6 +664,7 @@ def _finalize_failure(job_id: str, code: str, message: str) -> None:
         job = db.get(ScrapeJob, job_id)
         if job is None:
             return
+        owner_id = job.owner_id
         job.status = "failed"
         job.errors_count += 1
         job.completed_at = _now()
@@ -670,6 +674,7 @@ def _finalize_failure(job_id: str, code: str, message: str) -> None:
         )
         db.commit()
     job_state.set_status(job_id, "failed")  # Redis mirror (finalplanv2 §8b)
+    cache.invalidate_usage(owner_id)  # quota readout changed (job terminal)
 
 
 # ---------------------------------------------------------------------------

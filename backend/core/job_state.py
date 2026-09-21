@@ -68,6 +68,15 @@ def _get_client() -> "redis.Redis | None":
     return _SYNC_CLIENT
 
 
+def get_client() -> "redis.Redis | None":
+    """Public accessor for the shared sync Redis client (None = degraded).
+
+    Other Redis-backed subsystems (the read cache) reuse this one process-wide
+    connection rather than opening their own.
+    """
+    return _get_client()
+
+
 def close() -> None:
     """Close the sync client at app shutdown (best-effort)."""
     global _SYNC_CLIENT
