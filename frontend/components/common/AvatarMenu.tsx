@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 export function AvatarMenu() {
   const { user, profile, signOut } = useAuth();
   const [open, setOpen] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -54,6 +55,12 @@ export function AvatarMenu() {
   const planLabel = PLAN_LABELS[profile?.plan ?? ""] ?? "Basic";
   const initial = name.charAt(0).toUpperCase();
 
+  // Photo source of truth is the Firebase client user object (always current,
+  // no DB round-trip and no image bytes stored anywhere); the backend profile
+  // URL is only a fallback. If neither exists — or the image fails to load —
+  // we render the initials instead of a broken-image icon.
+  const photoUrl = user.photoURL || profile?.photo_url || null;
+
   const itemClass =
     "flex w-full items-center gap-2.5 px-4 py-2 text-sm font-medium text-ink-muted transition-colors hover:bg-bg-subtle hover:text-ink";
 
@@ -68,12 +75,14 @@ export function AvatarMenu() {
         aria-haspopup="menu"
         className="flex items-center gap-1.5 text-ink-muted transition-colors hover:text-ink"
       >
-        {profile?.photo_url ? (
+        {photoUrl && !imgFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={profile.photo_url}
+            src={photoUrl}
             alt=""
             aria-hidden="true"
+            referrerPolicy="no-referrer"
+            onError={() => setImgFailed(true)}
             className="h-7 w-7 rounded-full border border-border object-cover"
           />
         ) : (
