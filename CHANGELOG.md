@@ -1,3 +1,15 @@
+# [1.2.0](https://github.com/teampostharvest/postharvest/compare/v1.1.0...v1.2.0) (2026-09-21)
+
+
+### Bug Fixes
+
+* **frontend:** load avatar from firebase user with initials fallback ([1264a81](https://github.com/teampostharvest/postharvest/commit/1264a8140e7cd793791db2ae3eb7316ad851f3a1))
+
+
+### Features
+
+* **frontend:** overhaul dashboard shell with ops rail and usage api ([c212e3b](https://github.com/teampostharvest/postharvest/commit/c212e3b53636b71eea6bccdb6ed82cdb0df308df))
+
 # [1.1.0](https://github.com/teampostharvest/postharvest/compare/v1.0.1...v1.1.0) (2026-09-17)
 
 
