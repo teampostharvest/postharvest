@@ -31,6 +31,7 @@ function authValue(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
     profile: null,
     loading: false,
     getIdToken: vi.fn(async () => "id-token"),
+    refreshProfile: vi.fn(async () => undefined),
     signInWithGoogle: vi.fn(async () => undefined),
     signInWithEmail: vi.fn(async () => undefined),
     signUpWithEmail: vi.fn(async () => undefined),
@@ -110,6 +111,31 @@ describe("SignInScreen", () => {
   });
 
   it("redirects a signed-in visitor to the dashboard", async () => {
+    mockUseAuth.mockReturnValue(
+      authValue({ user: { email: "agent@example.com" } as unknown as User })
+    );
+    render(<SignInScreen />);
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith("/");
+    });
+  });
+
+  it("returns a signed-in visitor to their pending hero target", async () => {
+    window.sessionStorage.setItem("postharvest.pending-target", "https://www.facebook.com/ExamplePage");
+    mockUseAuth.mockReturnValue(
+      authValue({ user: { email: "agent@example.com" } as unknown as User })
+    );
+    render(<SignInScreen />);
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalledWith(
+        "/investigation?url=https%3A%2F%2Fwww.facebook.com%2FExamplePage"
+      );
+    });
+    expect(window.sessionStorage.getItem("postharvest.pending-target")).toBeNull();
+  });
+
+  it("ignores a non-URL pending target", async () => {
+    window.sessionStorage.setItem("postharvest.pending-target", "javascript:alert(1)");
     mockUseAuth.mockReturnValue(
       authValue({ user: { email: "agent@example.com" } as unknown as User })
     );

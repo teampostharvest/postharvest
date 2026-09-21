@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { isFacebookUrl, safeHttpUrl, isTerminalStatus, ApiError } from "@/lib/api";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { isFacebookUrl, safeHttpUrl, isTerminalStatus, ApiError, api } from "@/lib/api";
 
 describe("safeHttpUrl", () => {
   it("allows standard http and https URLs", () => {
@@ -106,5 +106,87 @@ describe("ApiError", () => {
     expect(err.code).toBe("job_not_found");
     expect(err.message).toBe("Job 123 does not exist");
     expect(err.details).toEqual({ jobId: "123" });
+  });
+});
+
+describe("plan endpoints", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the public tier catalog", async () => {
+    const catalog = [
+      {
+        id: "basic",
+        name: "Basic",
+        limits: { urls: 5, max_posts: 500, concurrent_jobs: 1, personal_accounts: 1 },
+      },
+      {
+        id: "enterprise",
+        name: "Enterprise",
+        limits: { urls: null, max_posts: null, concurrent_jobs: 10, personal_accounts: null },
+      },
+    ];
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => catalog });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.listPlans()).resolves.toEqual(catalog);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toContain("/api/plans");
+    expect(init).toMatchObject({ cache: "no-store" });
+  });
+
+  it("fetches the quota readout", async () => {
+    const usage = {
+      plan: "pro",
+      jobs_running: { used: 2, limit: 3 },
+      personal_accounts: { used: 1, limit: 5 },
+      per_job: { urls: 50, max_posts: 5000 },
+      posts_today: 128,
+    };
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => usage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getUsage()).resolves.toEqual(usage);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toContain("/api/usage");
+    expect(init).toMatchObject({ cache: "no-store" });
+  });
+
+  it("passes the status filter when listing jobs", async () => {
+    const page = { items: [], total: 0, page: 1, page_size: 25 };
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => page });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      api.listJobs({ status: "queued,running", page: 1, page_size: 25 })
+    ).resolves.toEqual(page);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toContain("/api/jobs?");
+    expect(String(url)).toContain("status=queued%2Crunning");
+  });
+
+  it("bounds every request with an abort signal", async () => {
+    const usage = {
+      plan: "basic",
+      jobs_running: { used: 0, limit: 1 },
+      personal_accounts: { used: 0, limit: 1 },
+      per_job: { urls: 5, max_posts: 500 },
+      posts_today: 0,
+      jobs_today: 0,
+    };
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => usage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getUsage();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 });

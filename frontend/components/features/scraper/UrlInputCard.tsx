@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CircleCheck, CircleX, Play, RotateCcw } from "lucide-react";
+import { CircleCheck, CircleX, RotateCcw } from "lucide-react";
+import { LaunchButton } from "@/components/common/LaunchButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { api, isFacebookUrl } from "@/lib/api";
-import { readScrapeDefaults } from "@/lib/settings";
+import { readActiveAccount, readScrapeDefaults, writeActiveAccount } from "@/lib/settings";
 import type { AccountSession, PostType, ScrapeRequest } from "@/lib/types";
 import { cn, formatDateTime } from "@/lib/utils";
 
@@ -58,18 +59,17 @@ const SCROLL_ROUND_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "300", label: "300 rounds (max)" },
 ];
 
-const FIELD_INPUT_CLASS =
-  "h-9 rounded-none border border-black bg-white font-sans text-sm tracking-normal text-black placeholder:text-neutral-400 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-neutral-400";
+const FIELD_INPUT_CLASS = "h-9";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <p className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">{children}</p>
+    <p className="text-xs font-medium text-ink-muted">{children}</p>
   );
 }
 
 function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: React.ReactNode }) {
   return (
-    <label htmlFor={htmlFor} className="mb-1.5 block font-sans text-xs font-medium normal-case text-neutral-700">
+    <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-ink">
       {children}
     </label>
   );
@@ -101,11 +101,11 @@ function ToggleGroup<T extends string>({
             disabled={disabled}
             aria-pressed={active}
             className={cn(
-              "-ml-px border px-3 py-1.5 font-sans text-xs font-medium normal-case transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-neutral-400 first:ml-0",
+              "-ml-px border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/30 first:ml-0",
               index > 0 && "-ml-px",
               active
-                ? "border-black bg-black text-white"
-                : "border-neutral-200 bg-white text-neutral-500 hover:border-black hover:text-black"
+                ? "border-ink bg-ink text-bg"
+                : "border-border-strong bg-bg-elevated text-ink-muted hover:border-accent hover:text-ink"
             )}
           >
             {option.label}
@@ -144,13 +144,20 @@ export function UrlInputCard({
   }, []);
 
   // Load the saved sessions for the account dropdown (ops pool + my own).
+  // When the sidebar selector (or a previous run) named an active session
+  // that still exists, prefill it so the next run uses it.
   useEffect(() => {
     let cancelled = false;
     api
       .listAccounts()
       .then((res) => {
         if (!cancelled) {
-          setAccounts([...(res.ops ?? []), ...(res.mine ?? [])]);
+          const all = [...(res.ops ?? []), ...(res.mine ?? [])];
+          setAccounts(all);
+          const active = readActiveAccount();
+          if (active && all.some((entry) => `${entry.scope}:${entry.name}` === active)) {
+            setAccount(active);
+          }
         }
       })
       .catch(() => {
@@ -237,6 +244,10 @@ export function UrlInputCard({
       .map((entry) => entry.normalized);
     const parsedMax = Number.parseInt(maxPosts, 10);
     const parsedScrolls = Number.parseInt(scrolls, 10);
+    const accountSpec = useBrowser && account.trim() !== "" ? account.trim() : null;
+    // Remember the session as the panel's active account (anonymous runs
+    // clear it — there is no backend default account).
+    writeActiveAccount(accountSpec);
     onSubmit({
       urls,
       max_posts: Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : null,
@@ -244,7 +255,7 @@ export function UrlInputCard({
       end_date: endDate === "" ? null : endDate,
       post_type: postType === "" ? null : postType,
       use_browser: useBrowser,
-      account: useBrowser && account.trim() !== "" ? account.trim() : null,
+      account: accountSpec,
       scrolls: useBrowser && Number.isFinite(parsedScrolls) && parsedScrolls > 0 ? parsedScrolls : null,
     });
   };
@@ -264,33 +275,43 @@ export function UrlInputCard({
           placeholder={"https://www.facebook.com/examplepage"}
           disabled={disabled}
           rows={4}
-          className="mt-2 w-full resize-y rounded-none border border-black bg-white p-4 font-mono text-sm tracking-normal text-black placeholder:text-neutral-400 focus:outline-hidden focus:ring-0"
+          className="mt-2 w-full resize-y rounded-md border border-border-strong bg-bg-elevated p-4 font-mono text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-hidden"
         />
-        <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-neutral-400">
+        <p className="mt-2 text-xs text-ink-muted">
           Paste one Facebook public page or profile URL per line
         </p>
 
         {/* Validation */}
         {parsedUrls.length > 0 ? (
           <div className="mt-4">
-            <p className="font-sans text-xs text-neutral-500">
-              {validCount > 0 ? <span className="text-green-700">{`${validCount} valid`}</span> : null}
-              {invalidCount > 0 ? (
-                <span className="text-red-700">{` · ${invalidCount} invalid`}</span>
+            <div className="flex flex-wrap items-center gap-1.5" role="status" aria-live="polite">
+              {validCount > 0 ? (
+                <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+                  {validCount} valid
+                </span>
               ) : null}
-              {duplicatedCount > 0 ? ` · ${duplicatedCount} duplicate line${duplicatedCount === 1 ? "" : "s"} ignored` : ""}
-            </p>
+              {invalidCount > 0 ? (
+                <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
+                  {invalidCount} invalid
+                </span>
+              ) : null}
+              {duplicatedCount > 0 ? (
+                <span className="rounded-full bg-bg-subtle px-2 py-0.5 text-xs font-medium text-ink-muted">
+                  {duplicatedCount} duplicate line{duplicatedCount === 1 ? "" : "s"} ignored
+                </span>
+              ) : null}
+            </div>
             <ul className="mt-1.5 max-h-40 space-y-1 overflow-y-auto">
               {parsedUrls.map((entry, index) => (
                 <li key={`${entry.raw}-${index}`} className="flex items-start gap-2 font-mono text-xs">
                   {entry.valid ? (
-                    <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-700" aria-hidden="true" />
+                    <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
                   ) : (
-                    <CircleX className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-700" aria-hidden="true" />
+                    <CircleX className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" aria-hidden="true" />
                   )}
-                  <span className={cn("min-w-0 break-all", entry.valid ? "text-neutral-800" : "text-neutral-400 line-through")}>
+                  <span className={cn("min-w-0 break-all", entry.valid ? "text-ink" : "text-ink-faint line-through")}>
                     {entry.raw}
-                    {entry.valid ? null : <span className="text-red-700 not-italic">, {entry.reason}</span>}
+                    {entry.valid ? null : <span className="text-danger not-italic">, {entry.reason}</span>}
                   </span>
                 </li>
               ))}
@@ -301,9 +322,10 @@ export function UrlInputCard({
 
       {/* Configuration */}
       <div className="mt-8">
-        <Eyebrow>Configuration · Filters</Eyebrow>
+        <Eyebrow>Configuration</Eyebrow>
 
         <div className="mt-3">
+          <p className="text-xs font-medium text-ink-muted">Filters</p>
           <FieldLabel htmlFor="time-frame">Time frame</FieldLabel>
           <ToggleGroup
             value={timeFrame}
@@ -312,7 +334,7 @@ export function UrlInputCard({
             disabled={disabled}
             ariaLabel="Time frame"
           />
-          <p className="mt-1.5 font-sans text-xs text-neutral-500">
+          <p className="mt-1.5 text-xs text-ink-muted">
             {dateRangeInvalid
               ? "End date must be on or after start date."
               : isCustomDate
@@ -398,11 +420,11 @@ export function UrlInputCard({
               checked={useBrowser}
               onChange={(event) => setUseBrowser(event.target.checked)}
               disabled={disabled}
-              className="mt-0.5 h-4 w-4 accent-black"
+              className="mt-0.5 h-4 w-4 accent-ink"
             />
             <span className="space-y-0.5">
-              <span className="block font-sans text-xs font-medium text-neutral-900">Browser Mode (Playwright)</span>
-              <span className="block font-sans text-xs leading-relaxed text-neutral-500">
+              <span className="block text-sm font-medium text-ink">Browser Mode (Playwright)</span>
+              <span className="block text-xs leading-relaxed text-ink-muted">
                 Scrapes the page's own GraphQL feed and scrolls to load more posts.
               </span>
             </span>
@@ -423,12 +445,12 @@ export function UrlInputCard({
                   {accounts.map((entry) => (
                     <option key={`${entry.scope}:${entry.name}`} value={`${entry.scope}:${entry.name}`}>
                       {entry.scope === "me" ? "me" : "ops"} / {entry.name}
-                      {entry.saved_at ? ` · saved ${formatDateTime(entry.saved_at)}` : ""}
-                      {entry.status === "VALID" ? "" : " · expired"}
+                      {entry.saved_at ? ` — saved ${formatDateTime(entry.saved_at)}` : ""}
+                      {entry.status === "VALID" ? "" : entry.status === "EXPIRED" ? " — needs attention" : " — unknown"}
                     </option>
                   ))}
                 </Select>
-                <p className="mt-1.5 font-sans text-xs leading-relaxed text-neutral-500">
+                <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">
                   Cookies unlock the full feed; anonymous sessions are capped by Facebook. Operators maintain the{" "}
                   <code className="font-mono">ops</code> pool; add your own from Saved Sessions.
                 </p>
@@ -455,32 +477,37 @@ export function UrlInputCard({
       </div>
 
       {/* Action bar */}
-      <div className="mt-8 flex flex-col-reverse items-stretch justify-between gap-4 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center">
+      <div className="mt-8 flex flex-col-reverse items-stretch justify-between gap-4 border-t border-border pt-6 sm:flex-row sm:items-center">
         {disabled ? (
-          <p className="font-sans text-xs text-neutral-500">
+          <p className="text-xs text-ink-muted">
             Scraping in progress, inputs are locked until the job finishes.
           </p>
         ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={clearAll}
-            disabled={submitting}
-            className="justify-start rounded-none px-0 font-mono text-xs uppercase text-neutral-400 hover:bg-transparent hover:text-black"
-          >
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Clear
-          </Button>
+          <div className="flex flex-col gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={clearAll}
+              disabled={submitting}
+              className="justify-start px-0 text-sm font-medium text-ink-muted hover:bg-transparent hover:text-ink"
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Clear
+            </Button>
+            {!useBrowser && accounts.length > 0 ? (
+              <p className="text-xs text-ink-muted">
+                Saved sessions apply to browser-mode runs only.
+              </p>
+            ) : null}
+          </div>
         )}
-        <Button
-          type="button"
+        <LaunchButton
           onClick={handleSubmit}
           disabled={!canSubmit}
           loading={submitting}
-          className="h-12 w-full rounded-none bg-black px-8 py-3 font-mono text-xs uppercase tracking-widest text-white transition-colors hover:bg-neutral-800 sm:w-auto"
+          loadingLabel="Starting…"
         >
-          <Play className="h-4 w-4" aria-hidden="true" />
-          {submitting ? "Starting…" : "Start Scraping"}
-        </Button>
+          Start Scraping
+        </LaunchButton>
       </div>
     </div>
   );

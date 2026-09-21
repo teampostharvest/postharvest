@@ -66,7 +66,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       />
       <div
         className={cn(
-          "relative z-10 flex max-h-[86dvh] w-full flex-col overflow-hidden rounded-t-lg border bg-popover text-popover-foreground animate-dialog-in sm:rounded-lg",
+          "relative z-10 flex max-h-[86dvh] w-full flex-col overflow-hidden rounded-t-lg border border-border bg-popover text-popover-foreground shadow-lg animate-dialog-in sm:rounded-lg",
           sizeClasses[size],
           className
         )}

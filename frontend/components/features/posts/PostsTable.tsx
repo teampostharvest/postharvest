@@ -71,12 +71,12 @@ function MediaThumb({ post }: { post: Post }) {
   const isVideo = post.post_type === "video" || (post.media_type ?? "").toLowerCase() === "video";
   if (isVideo && safeHttpUrl(post.video_url)) {
     return (
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-bg-subtle text-ink-muted">
         <Play className="h-4 w-4" aria-hidden="true" />
       </span>
     );
   }
-  return <span className="w-10 shrink-0 text-center text-muted-foreground" aria-label="No media">–</span>;
+  return <span className="w-10 shrink-0 text-center text-ink-muted" aria-label="No media">–</span>;
 }
 
 interface SortHeaderProps {
@@ -88,11 +88,11 @@ interface SortHeaderProps {
 
 function SortHeader({ label, active, direction, onClick }: SortHeaderProps) {
   return (
-    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">
+    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-ink-muted">
       <button
         type="button"
         onClick={onClick}
-        className={cn("inline-flex items-center gap-1 rounded transition-colors hover:text-foreground", active && "text-foreground")}
+        className={cn("inline-flex items-center gap-1 rounded transition-colors hover:text-ink", active && "text-ink")}
       >
         {label}
         {active ? (
@@ -176,12 +176,12 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
       <CardHeader className="space-y-3 pb-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle>Posts preview</CardTitle>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-ink-muted">
             <span className="tabular-nums">{formatNumber(total)}</span> post{total === 1 ? "" : "s"} in dataset
           </div>
         </div>
         <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -209,21 +209,21 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
         ) : loading && posts.length === 0 ? (
           <div className="space-y-2" aria-label="Loading posts">
             {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="flex animate-pulse items-center gap-4 rounded-lg border bg-muted/20 px-3 py-3">
-                <div className="h-10 w-10 rounded bg-muted-foreground/15" />
+              <div key={index} className="flex animate-pulse items-center gap-4 rounded-lg border bg-bg-subtle/20 px-3 py-3">
+                <div className="h-10 w-10 rounded bg-ink-muted/15" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-3 w-2/5 rounded bg-muted-foreground/15" />
-                  <div className="h-3 w-3/5 rounded bg-muted-foreground/10" />
+                  <div className="h-3 w-2/5 rounded bg-ink-muted/15" />
+                  <div className="h-3 w-3/5 rounded bg-ink-muted/10" />
                 </div>
-                <div className="h-4 w-16 rounded bg-muted-foreground/10" />
+                <div className="h-4 w-16 rounded bg-ink-muted/10" />
               </div>
             ))}
           </div>
         ) : pageItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-14 text-center">
-            <Inbox className="h-8 w-8 text-muted-foreground/60" aria-hidden="true" />
+            <Inbox className="h-8 w-8 text-ink-muted/60" aria-hidden="true" />
             <p className="text-sm font-medium">{loaded ? (query ? "No posts match your search." : "No posts were extracted.") : "Loading…"}</p>
-            <p className="max-w-sm text-xs text-muted-foreground">
+            <p className="max-w-sm text-xs text-ink-muted">
               {query
                 ? "Try a different search term, or export the full dataset."
                 : "The job completed without posts. Check the job status above or run a new scrape with different URLs."}
@@ -235,14 +235,14 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
               <thead>
                 <tr className="border-b text-left">
                   <SortHeader label="Date" active={sortKey === "date"} direction={sortDir} onClick={() => toggleSort("date")} />
-                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Page</th>
-                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Post text</th>
-                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Type</th>
+                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-ink-muted">Page</th>
+                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-ink-muted">Post text</th>
+                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-ink-muted">Type</th>
                   <SortHeader label="Likes" active={sortKey === "likes"} direction={sortDir} onClick={() => toggleSort("likes")} />
                   <SortHeader label="Comments" active={sortKey === "comments"} direction={sortDir} onClick={() => toggleSort("comments")} />
                   <SortHeader label="Shares" active={sortKey === "shares"} direction={sortDir} onClick={() => toggleSort("shares")} />
-                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Media</th>
-                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Post URL</th>
+                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-ink-muted">Media</th>
+                  <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-ink-muted">Post URL</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -251,7 +251,7 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
                   return (
                     <tr
                       key={post.post_id ?? `${post.post_url ?? "post"}-${index}`}
-                      className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:bg-muted/40"
+                      className="cursor-pointer transition-colors hover:bg-bg-subtle/40 focus-visible:bg-bg-subtle/40"
                       tabIndex={0}
                       role="button"
                       aria-label={`Open post details${post.page_name ? ` from ${post.page_name}` : ""}`}
@@ -263,15 +263,15 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
                         }
                       }}
                     >
-                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-muted-foreground">
+                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-ink-muted">
                         <span title={post.published_at ?? undefined}>{formatDate(post.published_at ?? post.timestamp)}</span>
                       </td>
                       <td className="max-w-[160px] px-3 py-3">
                         <p className="truncate font-medium" title={post.page_name ?? undefined}>{post.page_name ?? "–"}</p>
-                        {post.page_id ? <p className="truncate text-xs text-muted-foreground">ID {post.page_id}</p> : null}
+                        {post.page_id ? <p className="truncate text-xs text-ink-muted">ID {post.page_id}</p> : null}
                       </td>
                       <td className="max-w-[300px] px-3 py-3">
-                        <p className="line-clamp-2 wrap-break-word text-muted-foreground">
+                        <p className="line-clamp-2 wrap-break-word text-ink-muted">
                           {post.text ?? post.caption ?? <span className="italic">No text</span>}
                         </p>
                       </td>
@@ -291,13 +291,13 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
                             target="_blank"
                             rel="noopener noreferrer"
                             aria-label={`Open post on Facebook${post.page_name ? ` (${post.page_name})` : ""}`}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-accent hover:text-ink"
                             onClick={(event) => event.stopPropagation()}
                           >
                             <ExternalLink className="h-4 w-4" aria-hidden="true" />
                           </a>
                         ) : (
-                          <span className="text-muted-foreground">–</span>
+                          <span className="text-ink-muted">–</span>
                         )}
                       </td>
                     </tr>
@@ -310,13 +310,13 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
 
         {!error && pageItems.length > 0 ? (
           <div className="flex flex-col-reverse items-center justify-between gap-3 sm:flex-row">
-            <p className="text-xs tabular-nums text-muted-foreground">
-              Showing <span className="font-medium text-foreground">{rangeStart}–{rangeEnd}</span> of{" "}
-              <span className="font-medium text-foreground">{formatNumber(sorted.length)}</span> filtered post{sorted.length === 1 ? "" : "s"}
+            <p className="text-xs tabular-nums text-ink-muted">
+              Showing <span className="font-medium text-ink">{rangeStart}–{rangeEnd}</span> of{" "}
+              <span className="font-medium text-ink">{formatNumber(sorted.length)}</span> filtered post{sorted.length === 1 ? "" : "s"}
             </p>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Rows</span>
+                <span className="text-xs text-ink-muted">Rows</span>
                 <Select
                   value={String(pageSize)}
                   onChange={(event) => setPageSize(Number(event.target.value))}
@@ -331,7 +331,7 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
               <Button variant="outline" size="sm" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
                 Previous
               </Button>
-              <span className="min-w-[70px] text-center text-xs tabular-nums text-muted-foreground">
+              <span className="min-w-[70px] text-center text-xs tabular-nums text-ink-muted">
                 Page {safePage} / {pageCount}
               </span>
               <Button variant="outline" size="sm" disabled={safePage >= pageCount} onClick={() => setPage(safePage + 1)}>

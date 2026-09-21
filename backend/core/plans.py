@@ -14,6 +14,13 @@ from __future__ import annotations
 
 PLANS: tuple[str, ...] = ("basic", "pro", "team", "enterprise")
 
+PLAN_NAMES: dict[str, str] = {
+    "basic": "Basic",
+    "pro": "Pro",
+    "team": "Team",
+    "enterprise": "Enterprise",
+}
+
 PLAN_LIMITS: dict[str, dict] = {
     "basic": {
         "urls": 5,
@@ -58,3 +65,16 @@ def normalize_plan(plan: str | None) -> str:
 def personal_account_cap(plan: str | None) -> int | None:
     """Max personal accounts for a plan (None = unlimited)."""
     return plan_limits(plan).get("personal_accounts")
+
+
+def plan_catalog() -> list[dict]:
+    """Return the ordered tier catalog as ``{id, name, limits}`` entries.
+
+    Single source of truth for the frontend pricing / selection UI: the
+    enforceable numbers come from :data:`PLAN_LIMITS` here, never from a
+    hand-copied table in the client.
+    """
+    return [
+        {"id": plan_id, "name": PLAN_NAMES[plan_id], "limits": dict(PLAN_LIMITS[plan_id])}
+        for plan_id in PLANS
+    ]

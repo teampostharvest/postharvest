@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from backend.api import accounts, admin, exports, health, jobs, scrape
+from backend.api import accounts, admin, exports, health, jobs, scrape, usage
 from backend.core.config import get_settings
 from backend.core.database import init_db
 from backend.core.exceptions import AppError
@@ -46,6 +46,12 @@ async def lifespan(_app: FastAPI):
     setup_logging(logging.DEBUG if settings.debug else logging.INFO)
     settings.ensure_dirs()
     init_db()
+    # Reconcile persisted job rows with the (empty) fresh worker pool:
+    # orphaned `running` jobs fail with an audit row, `queued` jobs resume.
+    # Best-effort — the sweep never raises, so boot cannot block on it.
+    from backend.services.job_service import sweep_orphaned_jobs
+
+    sweep_orphaned_jobs()
     # Log the URL the engine actually opened (database.py prefers
     # SUPABASE_DB_URL over DATABASE_URL) rather than the raw setting.
     from backend.core import database as _db
@@ -76,9 +82,11 @@ def create_app() -> FastAPI:
 
     _register_exception_handlers(app)
 
-    from backend.api import auth
+    from backend.api import auth, plans
 
     app.include_router(auth.router, prefix=settings.api_prefix)
+    app.include_router(plans.router, prefix=settings.api_prefix)
+    app.include_router(usage.router, prefix=settings.api_prefix)
     app.include_router(scrape.router, prefix=settings.api_prefix)
     app.include_router(jobs.router, prefix=settings.api_prefix)
     app.include_router(accounts.router, prefix=settings.api_prefix)

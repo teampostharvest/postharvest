@@ -666,6 +666,87 @@ def _finalize_failure(job_id: str, code: str, message: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Boot-time sweep (ROADMAP job-state hygiene)
+# ---------------------------------------------------------------------------
+
+RESTART_SUSPENDED_CODE = "suspended_by_restart"
+RESTART_SUSPENDED_MESSAGE = (
+    "Job did not finish before the server restarted; "
+    "no worker exists for it anymore. Re-submit to run it again."
+)
+
+
+def sweep_orphaned_jobs() -> dict:
+    """Reconcile job rows with the (empty) in-process worker pool on boot.
+
+    Worker state lives in :class:`JobManager` threads, so after any restart:
+
+    * ``running`` jobs/sources have no worker and can never finish — mark
+      them ``failed`` with a ``suspended_by_restart`` error row. Their quota
+      slots release as a consequence (the concurrency cap counts
+      queued+running only).
+    * ``queued`` jobs never started — re-submit their workers so they run.
+    * ``paused`` jobs are user intent — leave them; ``POST /resume`` restarts
+      them on demand.
+
+    Returns ``{"failed": [...], "resumed": [...]}`` job ids. Never raises:
+    callers run this before serving traffic, and a sweep failure must not
+    block boot (it is retried on the next boot).
+    """
+    failed: list[str] = []
+    resumed: list[str] = []
+    try:
+        with SessionLocal() as db:
+            orphaned = db.scalars(
+                select(ScrapeJob).where(ScrapeJob.status == "running")
+            ).all()
+            for job in orphaned:
+                job.status = "failed"
+                job.errors_count += 1
+                job.completed_at = _now()
+                job.updated_at = _now()
+                db.add(
+                    ScrapeError(
+                        job_id=job.id,
+                        source_url="",
+                        code=RESTART_SUSPENDED_CODE,
+                        message=RESTART_SUSPENDED_MESSAGE,
+                    )
+                )
+                failed.append(job.id)
+                db.execute(
+                    ScrapeSource.__table__.update()
+                    .where(
+                        ScrapeSource.job_id == job.id,
+                        ScrapeSource.status == "running",
+                    )
+                    .values(status="failed")
+                )
+            queued = db.scalars(
+                select(ScrapeJob.id).where(ScrapeJob.status == "queued")
+            ).all()
+            resumed.extend(str(job_id) for job_id in queued)
+            db.commit()
+    except Exception:  # noqa: BLE001 - sweep must never block boot
+        logger.exception("Startup sweep failed; will retry on next boot")
+        return {"failed": [], "resumed": []}
+
+    manager = JobManager.get()
+    for job_id in resumed:
+        try:
+            manager.submit(job_id, run_scrape_job)
+        except Exception:  # noqa: BLE001 - one bad job must not stop the sweep
+            logger.exception("Startup sweep could not resume job %s", job_id)
+    if failed or resumed:
+        logger.info(
+            "Startup sweep: %d orphaned job(s) failed, %d queued job(s) resumed",
+            len(failed),
+            len(resumed),
+        )
+    return {"failed": failed, "resumed": resumed}
+
+
+# ---------------------------------------------------------------------------
 # Storage helpers
 # ---------------------------------------------------------------------------
 

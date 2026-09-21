@@ -44,6 +44,19 @@ _SESSION_TMP = Path(tempfile.mkdtemp(prefix="fbscraper_tests_"))
 _SESSION_TMP.mkdir(parents=True, exist_ok=True)
 
 os.environ["DATABASE_URL"] = "sqlite:///" + (_SESSION_TMP / "test.db").as_posix()
+# Neutralize production-ish settings from root `.env` (loaded by pydantic
+# settings via config.py). The suite's assertions assume the code defaults:
+# * SUPABASE_DB_URL   — database.py prefers it over DATABASE_URL; without
+#   this the suite runs against the REAL Supabase instance (slow round-trips,
+#   pool contention with production, flaky plan/job timeouts).
+# * MAX_URLS_PER_JOB  — root `.env` sets 100, but plan-cap tests assume the
+#   code default of 300 (enterprise sends 200 URLs, team ceiling is 150).
+# * COOKIE_ENCRYPTION_KEY — enables at-rest Fernet encryption of personal
+#   cookies; mirror tests assert the plaintext jar.
+# CI is exempt only because it has no `.env` file.
+os.environ["SUPABASE_DB_URL"] = ""
+os.environ["MAX_URLS_PER_JOB"] = "300"
+os.environ["COOKIE_ENCRYPTION_KEY"] = ""
 os.environ["EXPORT_BASE_DIR"] = str(_SESSION_TMP / "exports")
 os.environ["DATA_DIR"] = str(_SESSION_TMP / "data")
 os.environ["CANCEL_WAIT_SECONDS"] = "2"  # keep DELETE/cancellation tests fast
@@ -60,6 +73,18 @@ def _check_environment() -> None:
 
     s = get_settings()
     assert _SESSION_TMP.as_posix() in s.database_url, "DATABASE_URL did not take effect"
+    assert not s.supabase_db_url, (
+        "SUPABASE_DB_URL leaked from root .env into the test process; "
+        "tests would hit the production database"
+    )
+    assert s.max_urls_per_job == 300, (
+        f"MAX_URLS_PER_JOB leaked from root .env (got {s.max_urls_per_job}); "
+        "plan-cap tests assume the 300 default"
+    )
+    assert not s.cookie_encryption_key, (
+        "COOKIE_ENCRYPTION_KEY leaked from root .env; mirror tests assume "
+        "plaintext cookie jars"
+    )
     assert s.cancel_wait_seconds == 2.0, "CANCEL_WAIT_SECONDS did not take effect"
 
 

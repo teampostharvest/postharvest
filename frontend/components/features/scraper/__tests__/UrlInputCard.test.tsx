@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { UrlInputCard } from "@/components/features/scraper/UrlInputCard";
+import { readActiveAccount, writeActiveAccount } from "@/lib/settings";
 import type { ScrapeRequest } from "@/lib/types";
 
 vi.mock("@/lib/settings", () => ({
@@ -10,6 +11,8 @@ vi.mock("@/lib/settings", () => ({
     scrolls: "",
     useBrowser: false,
   })),
+  readActiveAccount: vi.fn(() => null),
+  writeActiveAccount: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -76,7 +79,7 @@ describe("UrlInputCard", () => {
     fireEvent.change(screen.getByPlaceholderText(URLS_INPUT), {
       target: { value: "https://twitter.com/not-facebook" },
     });
-    expect(screen.getByText("· 1 invalid")).toBeInTheDocument();
+    expect(screen.getByText("1 invalid")).toBeInTheDocument();
     expect(screen.getByText(/not a facebook\.com address/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start scraping/i })).toBeDisabled();
     expect(submit).not.toHaveBeenCalled();
@@ -92,7 +95,7 @@ describe("UrlInputCard", () => {
     });
 
     expect(screen.getByText("1 valid")).toBeInTheDocument();
-    expect(screen.getByText("· 1 invalid")).toBeInTheDocument();
+    expect(screen.getByText("1 invalid")).toBeInTheDocument();
     expect(screen.getByText(/1 duplicate line ignored/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /start scraping/i }));
@@ -162,6 +165,11 @@ describe("UrlInputCard", () => {
     expect(accountSelect).toBeInTheDocument();
     expect(scrollSelect).toBeInTheDocument();
 
+    // Accounts load asynchronously; wait for the option before selecting it.
+    // Changing an empty <select> is clamped back to "" by jsdom, which drops
+    // the account from the payload and flakes this test under load.
+    await screen.findByRole("option", { name: /ops-pool-1/ });
+
     fireEvent.change(accountSelect, { target: { value: "ops:ops-pool-1" } });
     fireEvent.change(scrollSelect, { target: { value: "20" } });
     fireEvent.click(screen.getByRole("button", { name: /start scraping/i }));
@@ -170,6 +178,18 @@ describe("UrlInputCard", () => {
     expect(payload.use_browser).toBe(true);
     expect(payload.account).toBe("ops:ops-pool-1");
     expect(payload.scrolls).toBe(20);
+    // The session is remembered as the panel's active account.
+    expect(writeActiveAccount).toHaveBeenCalledWith("ops:ops-pool-1");
+  });
+
+  it("prefills the account dropdown from the active session when it still exists", async () => {
+    vi.mocked(readActiveAccount).mockReturnValue("ops:ops-pool-1");
+    const submit = vi.fn();
+    render(<UrlInputCard onSubmit={submit} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /browser mode/i }));
+    const accountSelect = (await screen.findByLabelText(/saved account/i)) as HTMLSelectElement;
+    await screen.findByRole("option", { name: /ops-pool-1/ });
+    expect(accountSelect.value).toBe("ops:ops-pool-1");
   });
 
   it("prefills from initialUrls prop", () => {
@@ -207,5 +227,14 @@ describe("UrlInputCard", () => {
     const submit = vi.fn();
     render(<UrlInputCard onSubmit={submit} submitting />);
     expect(screen.getByText("Starting…")).toBeInTheDocument();
+  });
+
+  it("notes that saved sessions apply to browser runs only", async () => {
+    const submit = vi.fn();
+    render(<UrlInputCard onSubmit={submit} />);
+    // Accounts load async; the note appears once sessions exist.
+    await screen.findByText("Saved sessions apply to browser-mode runs only.");
+    fireEvent.click(screen.getByRole("checkbox", { name: /browser mode/i }));
+    expect(screen.queryByText("Saved sessions apply to browser-mode runs only.")).not.toBeInTheDocument();
   });
 });

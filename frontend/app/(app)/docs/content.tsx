@@ -2,34 +2,34 @@ import type { ReactNode } from "react";
 import { findDocsPage } from "@/lib/docs-meta";
 
 function P({ children }: { children: ReactNode }) {
-  return <p className="text-sm leading-relaxed text-muted-foreground">{children}</p>;
+  return <p className="text-sm leading-relaxed text-ink-muted">{children}</p>;
 }
 
 function Li({ children }: { children: ReactNode }) {
-  return <li className="text-sm leading-relaxed text-muted-foreground">{children}</li>;
+  return <li className="text-sm leading-relaxed text-ink-muted">{children}</li>;
 }
 
 function Code({ children }: { children: ReactNode }) {
-  return <code className="rounded-sm bg-muted px-1.5 py-0.5 text-[12px] text-foreground">{children}</code>;
+  return <code className="rounded-sm bg-bg-subtle px-1.5 py-0.5 text-[12px] text-ink">{children}</code>;
 }
 
 function Pre({ children }: { children: ReactNode }) {
   return (
-    <pre className="overflow-x-auto rounded-md border border-border bg-background px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+    <pre className="overflow-x-auto rounded-md border border-border bg-bg px-4 py-3 text-xs leading-relaxed text-ink-muted">
       {children}
     </pre>
   );
 }
 
 function H2({ children }: { children: ReactNode }) {
-  return <h2 className="pt-2 text-sm font-semibold tracking-tight text-foreground">{children}</h2>;
+  return <h2 className="pt-2 text-sm font-semibold tracking-tight text-ink">{children}</h2>;
 }
 
 function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
   return (
     <div className="overflow-x-auto rounded-md border border-border">
       <table className="w-full text-left text-xs">
-        <thead className="bg-muted text-muted-foreground">
+        <thead className="bg-bg-subtle text-ink-muted">
           <tr>
             {head.map((h) => (
               <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">
@@ -42,7 +42,7 @@ function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
           {rows.map((cells, i) => (
             <tr key={i}>
               {cells.map((cell, j) => (
-                <td key={j} className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground">
+                <td key={j} className="whitespace-nowrap px-3 py-2 align-top text-ink-muted">
                   {cell}
                 </td>
               ))}
@@ -59,7 +59,7 @@ const BODIES: Record<string, ReactNode> = {
     <>
       <H2>What this is</H2>
       <P>
-        PostHarvest extracts <strong className="text-foreground">publicly available</strong> posts from
+        PostHarvest extracts <strong className="text-ink">publicly available</strong> posts from
         Facebook pages and profiles and saves them to a local database. A background worker tracks progress per page,
         a dashboard lets you watch a run live, and results can be exported as JSON, CSV or Excel.
       </P>
@@ -302,7 +302,7 @@ npm run dev   # http://localhost:3000`}</Pre>
       </P>
 
       <H2>Try it yourself</H2>
-      <ol className="list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-muted-foreground">
+      <ol className="list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-ink-muted">
         <li>Save a session once: <Code>python cli.py login --account default</Code>.</li>
         <li>Start a browser scrape: tick <Code>Browser mode</Code> in the dashboard, or pass <Code>--browser --scrolls 60</Code> on the CLI.</li>
         <li>Watch the live progress bar, then open the completed run&lsquo;s posts.</li>

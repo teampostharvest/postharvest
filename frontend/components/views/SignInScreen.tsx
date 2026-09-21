@@ -35,8 +35,8 @@ function GoogleMark({ className }: { className?: string }) {
 function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div>
-      <p className="font-sans text-3xl font-light text-white tabular-nums">{value}</p>
-      <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">{label}</p>
+      <p className="font-display text-3xl font-medium text-bg tabular-nums">{value}</p>
+      <p className="mt-1 text-xs font-medium text-bg/70">{label}</p>
     </div>
   );
 }
@@ -58,10 +58,21 @@ export function SignInScreen() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // A signed-in visitor landing on /login is sent to the dashboard.
+  // A signed-in visitor landing on /login is sent to the dashboard —
+  // or straight back to the hero target they pasted before signing in.
   useEffect(() => {
     if (user && !loading) {
-      router.replace("/");
+      let dest = "/";
+      try {
+        const pending = window.sessionStorage.getItem("postharvest.pending-target");
+        if (pending && /^https?:\/\//i.test(pending.trim())) {
+          dest = `/investigation?url=${encodeURIComponent(pending.trim())}`;
+        }
+        window.sessionStorage.removeItem("postharvest.pending-target");
+      } catch {
+        // Storage unavailable — fall through to the dashboard.
+      }
+      router.replace(dest);
     }
   }, [user, loading, router]);
 
@@ -96,29 +107,29 @@ export function SignInScreen() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-neutral-400">
+      <div className="flex min-h-screen items-center justify-center bg-bg text-ink-muted">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-white font-sans text-black">
+    <div className="flex min-h-screen bg-bg font-sans text-ink">
       {/* Left — editorial panel (dark), desktop only */}
-      <div className="hidden w-1/2 flex-col justify-between border-r border-zinc-800 bg-zinc-950 p-12 text-white lg:flex xl:p-16">
+      <div className="hidden w-1/2 flex-col justify-between border-r border-bg/10 bg-ink p-12 text-bg lg:flex xl:p-16">
         <div className="flex items-center gap-2.5">
-          <span className="h-2 w-2 bg-red-600" aria-hidden="true" />
-          <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-neutral-400">postharvest</span>
+          <span className="h-2 w-2 bg-accent" aria-hidden="true" />
+          <span className="font-mono text-xs text-bg/70">postharvest</span>
         </div>
 
         <div className="max-w-lg">
-          <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-red-600">one door in</p>
-          <h1 className="mt-5 font-sans text-5xl font-semibold leading-[1.05] tracking-tighter xl:text-6xl">
+          <p className="text-xs font-medium text-highlight">One door in</p>
+          <h1 className="mt-5 font-display text-3xl font-semibold leading-[1.1] tracking-tight">
             One pipeline
             <br />
             to get all of it.
           </h1>
-          <p className="mt-6 max-w-md text-[17px] font-light leading-[1.7] text-zinc-400">
+          <p className="mt-6 max-w-md text-lg leading-[1.7] text-bg/70">
             Sign in with Google or email — your targets, saved sessions and exports follow you. First time
             here? Your account is created the moment you sign in.
           </p>
@@ -129,8 +140,8 @@ export function SignInScreen() {
           </div>
         </div>
 
-        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
-          authorized use · public pages only
+        <p className="text-xs leading-relaxed text-bg/60">
+          Authorized use: public pages only.
         </p>
       </div>
 
@@ -138,25 +149,25 @@ export function SignInScreen() {
       <div className="flex w-full flex-col items-center justify-center px-4 py-12 sm:px-8 lg:w-1/2">
         {/* Compact brand row, mobile only */}
         <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-          <span className="h-2 w-2 bg-red-600" aria-hidden="true" />
-          <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-neutral-500">postharvest</span>
+          <span className="h-2 w-2 bg-accent" aria-hidden="true" />
+          <span className="font-mono text-xs text-ink-muted">postharvest</span>
         </div>
 
-        <div className="w-full max-w-md border border-neutral-200">
-          <div className="flex items-center justify-between gap-4 border-b border-neutral-200 px-6 py-3">
-            <span className="font-sans text-[11px] font-medium uppercase tracking-[0.2em] text-red-700">
-              sign in · sign up
+        <div className="w-full max-w-md rounded-md border border-border-strong bg-bg-elevated shadow-sm">
+          <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-3">
+            <span className="text-sm font-medium text-highlight">
+              {mode === "login" ? "Sign in" : "Create account"}
             </span>
             <Link
               href="/docs"
-              className="font-sans text-[11px] font-medium uppercase tracking-[0.2em] text-neutral-400 transition-colors hover:text-black"
+              className="text-sm font-medium text-ink-muted transition-colors hover:text-ink"
             >
-              need help?
+              Need help?
             </Link>
           </div>
 
           <div className="px-6 py-8">
-            <h2 className="font-sans text-2xl font-semibold tracking-tight">
+            <h2 className="font-display text-2xl font-semibold tracking-tight">
               Continue to your investigations.
             </h2>
 
@@ -164,28 +175,28 @@ export function SignInScreen() {
               type="button"
               onClick={() => void handleGoogle()}
               disabled={submitting}
-              className="mt-6 flex w-full items-center justify-center gap-3 border border-neutral-300 bg-white px-4 py-3 font-sans text-sm font-medium transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-6 flex w-full items-center justify-center gap-3 rounded-sm border border-border-strong bg-bg px-4 py-3 text-sm font-medium text-ink transition-colors hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-60"
             >
               <GoogleMark className="h-5 w-5" />
               Continue with Google
             </button>
 
-            <div className="mt-3 flex flex-col gap-1 font-mono text-[10px] uppercase tracking-[0.15em] text-neutral-400">
-              <span>we request · name · email · photo</span>
-              <span>we never ask · mail · contacts · drive</span>
+            <div className="mt-3 flex flex-col gap-1 text-xs text-ink-faint">
+              <span>We request: name, email, photo.</span>
+              <span>We never ask: mail, contacts, drive.</span>
             </div>
 
             <div className="my-6 flex items-center gap-3">
-              <span className="h-px flex-1 bg-neutral-200" />
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-neutral-400">or</span>
-              <span className="h-px flex-1 bg-neutral-200" />
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-xs font-medium text-ink-faint">or</span>
+              <span className="h-px flex-1 bg-border" />
             </div>
 
             <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
               <div className="space-y-1.5">
                 <label
                   htmlFor="signin-email"
-                  className="block font-mono text-[10px] uppercase tracking-[0.2em] text-neutral-500"
+                  className="block text-sm font-medium text-ink-muted"
                 >
                   Email
                 </label>
@@ -197,13 +208,13 @@ export function SignInScreen() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@example.com"
-                  className="border-neutral-300 bg-white placeholder:text-neutral-400"
+                  className="bg-bg"
                 />
               </div>
               <div className="space-y-1.5">
                 <label
                   htmlFor="signin-password"
-                  className="block font-mono text-[10px] uppercase tracking-[0.2em] text-neutral-500"
+                  className="block text-sm font-medium text-ink-muted"
                 >
                   Password
                 </label>
@@ -215,12 +226,12 @@ export function SignInScreen() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="••••••••"
-                  className="border-neutral-300 bg-white placeholder:text-neutral-400"
+                  className="bg-bg"
                 />
               </div>
 
               {error ? (
-                <p className="flex items-start gap-2 border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <p className="flex items-start gap-2 rounded-sm border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span>{error}</span>
                 </p>
@@ -244,14 +255,14 @@ export function SignInScreen() {
                 setError(null);
                 setMode(mode === "login" ? "signup" : "login");
               }}
-              className="mt-5 w-full text-center text-xs text-neutral-500 transition-colors hover:text-black"
+              className="mt-5 w-full text-center text-sm font-medium text-ink-muted transition-colors hover:text-ink"
             >
               {mode === "login" ? "No account yet? Create one" : "Already have an account? Sign in"}
             </button>
           </div>
 
-          <div className="border-t border-neutral-200 px-6 py-3">
-            <p className="text-[11px] leading-relaxed text-neutral-500">
+          <div className="border-t border-border px-6 py-3">
+            <p className="text-xs leading-relaxed text-ink-muted">
               By continuing you agree to the terms and confirm you only scrape pages you are authorised
               to investigate.
             </p>

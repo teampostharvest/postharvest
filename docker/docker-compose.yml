@@ -51,7 +51,10 @@ services:
       frontend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      # Probe HTTPS loopback (full proxy chain) with cert verification disabled:
+      # :80 only 301-redirects to https, and the Cloudflare origin cert is not
+      # trusted by wget's CA store, so a plain --spider on :80 always fails.
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "--spider", "https://127.0.0.1/"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -76,6 +79,12 @@ services:
     image: postharvest-backend:latest
     container_name: postharvest-backend
     init: true
+    # Never inherit LAN DNS: the local router mangles Google/Firebase answers
+    # (IPv6-only, unroutable), which wedged Firebase Auth and Supabase.
+    # Pinned public resolvers — same disease as the build-time workaround above.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     # Live session-capture browser (remote-debug CDP). The CDP endpoint is
     # bound to loopback INSIDE the container and deliberately NOT published:
     # the API proxies the DevTools frontend and bridges the websocket
@@ -152,6 +161,11 @@ services:
     image: postharvest-frontend:latest
     container_name: postharvest-frontend
     init: true
+    # Same pinned DNS as backend (see above) — the dev server must resolve
+    # external hosts (fonts, Firebase) without the LAN resolver.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       # Documented for clarity; has no effect at runtime (baked at build).
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}

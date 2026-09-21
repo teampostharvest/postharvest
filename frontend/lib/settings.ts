@@ -45,3 +45,49 @@ export function writeScrapeDefaults(defaults: ScrapeDefaults): void {
     // localStorage unavailable (private mode) — allow it to no-op.
   }
 }
+
+const LAST_ACCOUNT_KEY = "postharvest-last-account";
+const ACTIVE_ACCOUNT_KEY = "postharvest-active-account";
+
+/**
+ * The `scope:name` session prefilled for the next run (or null for
+ * anonymous). Set from the sidebar account selector; the run form also
+ * writes it on submit. The backend has no default-account concept, so this
+ * client-side value is what "active account" means everywhere in the UI.
+ * Reads the legacy `postharvest-last-account` key once as a migration.
+ */
+export function readActiveAccount(): string | null {
+  try {
+    const raw =
+      window.localStorage.getItem(ACTIVE_ACCOUNT_KEY) ??
+      window.localStorage.getItem(LAST_ACCOUNT_KEY);
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    return trimmed === "" ? null : trimmed;
+  } catch {
+    return null;
+  }
+}
+
+export function writeActiveAccount(spec: string | null): void {
+  try {
+    if (spec && spec.trim() !== "") {
+      window.localStorage.setItem(ACTIVE_ACCOUNT_KEY, spec.trim());
+    } else {
+      window.localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    }
+    window.localStorage.removeItem(LAST_ACCOUNT_KEY);
+  } catch {
+    // localStorage unavailable (private mode) — allow it to no-op.
+  }
+}
+
+/** @deprecated Use readActiveAccount (kept for the migration fallback). */
+export function readLastAccount(): string | null {
+  return readActiveAccount();
+}
+
+/** @deprecated Use writeActiveAccount. */
+export function writeLastAccount(spec: string | null): void {
+  writeActiveAccount(spec);
+}

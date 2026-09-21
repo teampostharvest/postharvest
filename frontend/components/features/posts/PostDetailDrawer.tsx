@@ -39,7 +39,7 @@ const REACTIONS: Array<{ key: keyof Post; emoji: string; label: string }> = [
 function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section className="border-t pt-4">
-      <h4 className="mb-2 text-xs font-medium text-muted-foreground">{label}</h4>
+      <h4 className="mb-2 text-xs font-medium text-ink-muted">{label}</h4>
       {children}
     </section>
   );
@@ -48,7 +48,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 function MetaItem({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="min-w-0">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-[11px] text-ink-muted">{label}</p>
       <p className="wrap-break-word font-mono text-xs">{value ?? "–"}</p>
     </div>
   );
@@ -86,7 +86,7 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Post details">
       <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} aria-hidden="true" />
-      <aside className="relative z-10 flex h-full w-full max-w-xl animate-slide-in-right flex-col border-l bg-background">
+      <aside className="relative z-10 flex h-full w-full max-w-xl animate-slide-in-right flex-col border-l bg-bg">
         {/* Header */}
         <header className="flex items-start justify-between gap-4 border-b px-5 py-4">
           <div className="min-w-0">
@@ -94,7 +94,7 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
               <h3 className="truncate text-base font-semibold">{post.page_name ?? "Unknown page"}</h3>
               {post.post_type ? <Badge variant="secondary">{post.post_type}</Badge> : null}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-ink-muted">
               {profileLink ? (
                 <a href={profileLink} target="_blank" rel="noopener noreferrer" className="hover:underline">
                   {post.profile_url ?? post.facebook_url ?? "Profile"}
@@ -113,11 +113,11 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
           {/* Meta */}
           <Section label="Details">
             <div className="grid grid-cols-2 gap-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-sm text-ink-muted">
                 <Calendar className="h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>{formatDateTime(post.published_at ?? post.timestamp)}</span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-sm text-ink-muted">
                 <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>ts {post.timestamp != null ? post.timestamp : "–"}</span>
               </div>
@@ -136,7 +136,7 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
           ) : null}
           {post.caption ? (
             <Section label="Caption">
-              <p className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-muted-foreground">{post.caption}</p>
+              <p className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-ink-muted">{post.caption}</p>
             </Section>
           ) : null}
 
@@ -193,10 +193,10 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
                 { icon: Share2, label: "Shares", value: post.shares },
                 { icon: Play, label: "Views", value: post.views_count },
               ].map((item) => (
-                <div key={item.label} className="rounded-lg border bg-muted/30 px-3 py-2 text-center">
-                  <item.icon className="mx-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <div key={item.label} className="rounded-lg border bg-bg-subtle/30 px-3 py-2 text-center">
+                  <item.icon className="mx-auto h-4 w-4 text-ink-muted" aria-hidden="true" />
                   <p className="mt-1 text-base font-semibold tabular-nums">{formatNumber(item.value)}</p>
-                  <p className="text-[11px] text-muted-foreground">{item.label}</p>
+                  <p className="text-[11px] text-ink-muted">{item.label}</p>
                 </div>
               ))}
             </div>
@@ -209,14 +209,14 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
                 {reactions.map((reaction) => (
                   <li key={reaction.key} className="flex items-center gap-3">
                     <span className="w-6 text-center text-sm" aria-hidden="true">{reaction.emoji}</span>
-                    <span className="w-14 shrink-0 text-xs text-muted-foreground">{reaction.label}</span>
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                    <span className="w-14 shrink-0 text-xs text-ink-muted">{reaction.label}</span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-bg-subtle">
                       <div
                         className="h-full rounded-full bg-primary/70"
                         style={{ width: `${maxReaction > 0 ? (reaction.count / maxReaction) * 100 : 0}%` }}
                       />
                     </div>
-                    <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                    <span className="w-10 shrink-0 text-right text-xs tabular-nums text-ink-muted">
                       {formatNumber(reaction.count)}
                     </span>
                   </li>
@@ -230,7 +230,7 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
             <Section label="Media">
               <div className="space-y-2">
                 {thumbnail ? (
-                  <div className="overflow-hidden rounded-lg border bg-muted/30">
+                  <div className="overflow-hidden rounded-lg border bg-bg-subtle/30">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={thumbnail}
@@ -241,7 +241,7 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
                   </div>
                 ) : null}
                 {post.media_type ? (
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <p className="flex items-center gap-1.5 text-xs text-ink-muted">
                     <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" /> {post.media_type}
                   </p>
                 ) : null}
@@ -271,7 +271,7 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
               <div className="flex items-center gap-2">
                 {post.transcript_language ? <Badge variant="secondary">{post.transcript_language}</Badge> : null}
               </div>
-              <p className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border bg-muted/30 p-3 text-sm leading-relaxed">
+              <p className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border bg-bg-subtle/30 p-3 text-sm leading-relaxed">
                 {post.transcript}
               </p>
             </Section>

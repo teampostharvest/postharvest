@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from backend.auth.dependencies import get_current_user
 from backend.core.config import get_settings
 from backend.core.database import get_db
-from backend.core.exceptions import AppError, NotFoundError
+from backend.core.exceptions import AppError, InvalidInputError, NotFoundError
 from backend.core.job_manager import JobManager
 from backend.models.errors import ScrapeError
 from backend.models.posts import Post
@@ -58,6 +58,10 @@ def _get_job_or_404(db: Session, job_id: str, owner_id: int | None = None) -> Sc
 def list_jobs(
     page: int = Query(1, ge=1, description="1-based page number"),
     page_size: int = Query(25, ge=1, le=100, description="Items per page (max 100)"),
+    status: str | None = Query(
+        None,
+        description="Comma-separated status filter (e.g. 'queued,running'). Powers the ops-panel active-jobs list.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> JobListResponse:
@@ -65,17 +69,31 @@ def list_jobs(
     settings = get_settings()
     page_size = min(page_size, settings.page_size_max)
 
+    statuses: list[str] | None = None
+    if status is not None:
+        statuses = [part.strip().lower() for part in status.split(",") if part.strip()]
+        unknown = [s for s in statuses if s not in ("queued", "running", "paused", "completed", "failed")]
+        if not statuses or unknown:
+            raise InvalidInputError(
+                f"Unknown job status filter: {', '.join(unknown) or status!r}. "
+                "Use queued, running, paused, completed, failed."
+            )
+
+    base_where = [ScrapeJob.owner_id == current_user.id]
+    if statuses is not None:
+        base_where.append(ScrapeJob.status.in_(statuses))
+
     total = int(
         db.scalar(
             select(func.count())
             .select_from(ScrapeJob)
-            .where(ScrapeJob.owner_id == current_user.id)
+            .where(*base_where)
         )
         or 0
     )
     jobs = db.scalars(
         select(ScrapeJob)
-        .where(ScrapeJob.owner_id == current_user.id)
+        .where(*base_where)
         .order_by(ScrapeJob.created_at.desc(), ScrapeJob.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -294,4 +312,9 @@ def resume_job(
     job.status = "queued"
     job.cancel_requested = False
     db.commit()
+    # A bare status flip strands the job: no worker watches the table, so
+    # hand it to the pool here (same entry point as a fresh submit).
+    from backend.services.job_service import run_scrape_job
+
+    JobManager.get().submit(job.id, run_scrape_job)
     return {"job_id": job.id, "status": "queued"}

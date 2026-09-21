@@ -11,7 +11,7 @@ export function Eyebrow({ className, ...props }: HTMLAttributes<HTMLParagraphEle
   return (
     <p
       className={cn(
-        "mb-4 block font-sans font-light text-[10px] uppercase tracking-[0.2em] text-highlight",
+        "mb-4 block text-xs font-semibold text-highlight",
         className
       )}
       {...props}
@@ -23,7 +23,7 @@ export function PageHeading({ className, ...props }: HTMLAttributes<HTMLHeadingE
   return (
     <h1
       className={cn(
-        "font-medium tracking-tighter leading-none text-5xl md:text-6xl text-foreground mb-8",
+        "font-display font-semibold tracking-tight leading-[1.04] text-4xl md:text-5xl text-ink mb-8",
         className
       )}
       {...props}
@@ -33,7 +33,7 @@ export function PageHeading({ className, ...props }: HTMLAttributes<HTMLHeadingE
 
 export function SectionHeading({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
   return (
-    <h2 className={cn("font-medium tracking-tight text-xl text-foreground mb-3", className)} {...props} />
+    <h2 className={cn("font-semibold tracking-tight text-lg text-ink mb-3", className)} {...props} />
   );
 }
 
@@ -46,13 +46,13 @@ export function StatBox({ label, value, className, ...props }: StatBoxProps) {
   return (
     <div
       className={cn(
-        "flex justify-between items-center py-3 border-b border-border font-mono text-xs text-muted-foreground last:border-b-0",
+        "flex items-center justify-between py-3 border-b border-border text-xs text-ink-muted last:border-b-0",
         className
       )}
       {...props}
     >
       <span>{label}</span>
-      <span className="text-foreground tabular-nums">{value}</span>
+      <span className="font-mono tabular-nums text-ink">{value}</span>
     </div>
   );
 }
@@ -61,7 +61,7 @@ export function FieldLabel({ className, ...props }: LabelHTMLAttributes<HTMLLabe
   return (
     <label
       className={cn(
-        "block font-sans font-light text-[10px] uppercase tracking-[0.2em] text-muted-foreground",
+        "block text-sm font-medium text-ink-muted",
         className
       )}
       {...props}
@@ -74,7 +74,7 @@ export function Chip({ className, ...props }: HTMLAttributes<HTMLSpanElement>) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground",
+        "inline-flex items-center gap-1.5 border border-border px-2 py-1 text-xs font-medium text-ink-muted",
         className
       )}
       {...props}

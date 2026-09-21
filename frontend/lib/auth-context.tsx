@@ -19,6 +19,7 @@ interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   getIdToken: () => Promise<string | null>;
+  refreshProfile: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (e: string, p: string) => Promise<void>;
   signUpWithEmail: (e: string, p: string) => Promise<void>;
@@ -30,6 +31,7 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   loading: true,
   getIdToken: async () => null,
+  refreshProfile: async () => {},
   signInWithGoogle: async () => {},
   signInWithEmail: async () => {},
   signUpWithEmail: async () => {},
@@ -75,6 +77,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return auth.currentUser.getIdToken();
   };
 
+  /** Re-fetch GET /api/auth/me so plan/role changes propagate across the app. */
+  const refreshProfile = async (): Promise<void> => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setProfile(null);
+      return;
+    }
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setProfile(res.ok ? ((await res.json()) as UserProfile) : null);
+    } catch {
+      setProfile(null);
+    }
+  };
+
   const signInWithGoogle = async () => {
     await signInWithPopup(auth, googleProvider);
   };
@@ -99,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         loading,
         getIdToken,
+        refreshProfile,
         signInWithGoogle,
         signInWithEmail,
         signUpWithEmail,

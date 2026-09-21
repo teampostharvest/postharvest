@@ -35,7 +35,7 @@ services:
       target: frontend-dev
       args:
         # next dev reads NEXT_PUBLIC_* at runtime; bake nothing.
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
         NEXT_PUBLIC_SITE_URL: http://localhost:3000
     image: postharvest-frontend-dev:latest
     ports:
@@ -45,7 +45,7 @@ services:
       - frontend-node-modules:/app/node_modules
       - frontend-next-cache:/app/.next
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
 
 volumes:

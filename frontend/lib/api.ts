@@ -17,9 +17,11 @@ import type {
   JobStatus,
   PaginatedPosts,
   PersonalLoginRequest,
+  PlanCatalog,
   Post,
   ScrapeRequest,
   ScrapeResponse,
+  UsageResponse,
   UserProfile,
 } from "./types";
 
@@ -28,7 +30,19 @@ import { EXPORT_FILENAMES } from "./types";
 /** Resolved at build time. Defaults to the local backend. */
 export const API_BASE: string = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/+$/, "");
 
+/** Wall-clock ceiling per API call: a wedged backend must surface as an
+ * error state, never an infinite spinner. */
+export const API_TIMEOUT_MS = 20000;
+
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "failed"]);
+
+function timeoutSignal(ms: number = API_TIMEOUT_MS): AbortSignal {
+  // AbortSignal.timeout is widely supported; fall back to manual abort.
+  if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
 
 export function isTerminalStatus(status: JobStatus | string | undefined | null): boolean {
   return status != null && TERMINAL_STATUSES.has(status);
@@ -74,6 +88,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       cache: "no-store",
       ...init,
       headers,
+      signal: init?.signal ?? timeoutSignal(),
     });
   } catch {
     throw new ApiError({
@@ -257,7 +272,7 @@ export const api = {
 
     let response: Response;
     try {
-      response = await fetch(url, { cache: "no-store", headers });
+      response = await fetch(url, { cache: "no-store", headers, signal: timeoutSignal() });
     } catch {
       throw new ApiError({
         code: "network_error",
@@ -302,10 +317,11 @@ export const api = {
   },
 
   /** GET /api/jobs — paginated history, newest first. */
-  async listJobs(params: { page?: number; page_size?: number } = {}): Promise<JobListResponse> {
+  async listJobs(params: { page?: number; page_size?: number; status?: string } = {}): Promise<JobListResponse> {
     const query = new URLSearchParams();
     if (params.page != null) query.set("page", String(params.page));
     if (params.page_size != null) query.set("page_size", String(params.page_size));
+    if (params.status != null) query.set("status", params.status);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<JobListResponse>(`/api/jobs${suffix}`);
   },
@@ -341,6 +357,16 @@ export const api = {
   /** GET /api/auth/me */
   async getProfile(): Promise<UserProfile> {
     return request<UserProfile>("/api/auth/me");
+  },
+
+  /** GET /api/plans — canonical tier catalog with server-enforced limits. */
+  async listPlans(): Promise<PlanCatalog> {
+    return request<PlanCatalog>("/api/plans");
+  },
+
+  /** GET /api/usage — used/limit quota readout for the sidebar panel. */
+  async getUsage(): Promise<UsageResponse> {
+    return request<UsageResponse>("/api/usage");
   },
 
   /** DELETE /api/accounts/{scope}/{name} — remove a saved session (ops role gates the ops scope). */
