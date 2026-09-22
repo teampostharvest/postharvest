@@ -114,6 +114,10 @@ services:
       # backend delegates HTTP-mode page fetches to the node service.
       # BASE_URL matches the compose service name on the stack network.
       USE_NODE: ${USE_NODE:-0}
+      # Browser-mode seam: when USE_NODE_BROWSER=1, browser-mode scrapes
+      # run through node's Playwright capture instead of the Python
+      # browser_scraper (independent of USE_NODE).
+      USE_NODE_BROWSER: ${USE_NODE_BROWSER:-0}
       NODE_BASE_URL: ${NODE_BASE_URL:-http://node:9334}
       COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-}
       # Comma-separated emails auto-promoted to the ops role on first login.

@@ -1500,6 +1500,61 @@ def parse_browser_page(
     )
 
 
+def _browser_node_enabled() -> bool:
+    """True when browser-mode captures should run through node
+    (``USE_NODE_BROWSER``, finalplanv2 §4 browser-mode / §12).
+
+    Independent of the http-mode ``use_node`` seam: both must be verified
+    against the legacy Python path before any cutover (§14 parity gates).
+    """
+    from backend.core.config import get_settings
+    return get_settings().use_node_browser
+
+
+def _browser_fetch(
+    url: str,
+    *,
+    max_posts: Optional[int] = None,
+    scroll_rounds: int = MAX_SCROLL_ROUNDS,
+    cancel_event: Optional[threading.Event] = None,
+    use_cookies: bool = True,
+    account_name: Optional[str] = None,
+    owner_id: Optional[int] = None,
+    progress_callback: Optional[Callable[..., None]] = None,
+) -> tuple:
+    """Dispatch one browser capture: node (``USE_NODE_BROWSER``) or Python.
+
+    Both paths return ``(html, stats)`` with the same tuple contract
+    (``stats`` = ``login_wall``/``posts_found``), so the 3-attempt retry
+    ladder in :func:`scrape_source_browser` is identical for either backend.
+    The flag-off path calls the module-global ``fetch_with_browser`` so the
+    existing wall-handling tests that ``patch.object(bs, "fetch_with_browser")``
+    keep intercepting.
+    """
+    if _browser_node_enabled():
+        from backend.services.node_browser import fetch_browser_via_node
+        return fetch_browser_via_node(
+            url,
+            max_posts=max_posts,
+            scroll_rounds=scroll_rounds,
+            cancel_event=cancel_event,
+            account_name=account_name,
+            owner_id=owner_id,
+            use_cookies=use_cookies,
+            progress_callback=progress_callback,
+        )
+    return fetch_with_browser(
+        url,
+        max_posts=max_posts,
+        scroll_rounds=scroll_rounds,
+        cancel_event=cancel_event,
+        account_name=account_name,
+        owner_id=owner_id,
+        use_cookies=use_cookies,
+        progress_callback=progress_callback,
+    )
+
+
 def scrape_source_browser(
     url: str,
     *,
@@ -1570,7 +1625,7 @@ def scrape_source_browser(
 
     for attempt in range(3):
         use_cookies = (attempt < 2) and account_name is not None
-        html, stats = fetch_with_browser(
+        html, stats = _browser_fetch(
             normalized_url,
             max_posts=max_posts,
             scroll_rounds=scroll_rounds if scroll_rounds is not None else MAX_SCROLL_ROUNDS,

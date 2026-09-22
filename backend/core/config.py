@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     # owns robots.txt, the shared Redis token bucket and retries, while FastAPI
     # keeps orchestrating variants / parsing / job bookkeeping.
     use_node: bool = False
+    # Browser-mode seam (finalplanv2 §4 browser-mode / §12): when ON,
+    # browser-mode scrapes run through the node service's Playwright
+    # capture (/fetch mode="browser") instead of the Python
+    # browser_scraper. Independent of use_node — both must be verified
+    # against the legacy path before any cutover (§14 parity gates).
+    use_node_browser: bool = False
     # Base URL of the node service. Defaults to the host-dev location;
     # Docker Compose overrides it to http://node:9334 on the stack
     # network (see docker/docker-compose.yml backend environment).
