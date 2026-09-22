@@ -8,6 +8,7 @@
 import type {
   AccountSession,
   AccountsResponse,
+  CookiesTxtRequest,
   SessionCaptureOut,
   AdminUser,
   ApiErrorBody,
@@ -351,6 +352,14 @@ export const api = {
   async cancelSessionCapture(captureId: string): Promise<void> {
     return request<void>(`/api/accounts/capture/${encodeURIComponent(captureId)}`, {
       method: "DELETE",
+    });
+  },
+
+  /** POST /api/accounts/cookies-txt — add a session by pasting an exported cookies.txt. */
+  async addCookiesTxt(payload: CookiesTxtRequest): Promise<AccountSession> {
+    return request<AccountSession>("/api/accounts/cookies-txt", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 

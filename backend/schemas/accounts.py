@@ -41,6 +41,27 @@ class SessionCaptureRequest(BaseModel):
     )
 
 
+class CookiesTxtRequest(BaseModel):
+    """Add a saved Facebook session by pasting an exported cookies.txt.
+
+    The cookies.txt (Netscape HTTP Cookie File) content is parsed server-side
+    into the same jar shape every other capture path produces; only the
+    resulting cookies get stored, never the raw text.
+    """
+
+    name: str = Field(..., min_length=1, max_length=64, description="Account label")
+    scope: Literal["ops", "me"] = Field(
+        "me",
+        description="me = personal session; ops = shared operator pool (ops role only)",
+    )
+    cookies_txt: str = Field(
+        ...,
+        min_length=1,
+        max_length=1_000_000,
+        description="Netscape HTTP Cookie File content (tab-separated rows)",
+    )
+
+
 class SessionCaptureOut(BaseModel):
     """Response with the pipe link the user opens to log into Facebook."""
 

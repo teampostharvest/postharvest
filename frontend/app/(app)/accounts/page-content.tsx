@@ -1,7 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, KeyRound, Loader2, Plus, RefreshCw, Trash2, Users } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import {
+  ClipboardPaste,
+  ExternalLink,
+  KeyRound,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Upload,
+  Users,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { AccountSession, SessionCaptureOut } from "@/lib/types";
@@ -12,6 +22,7 @@ import { Dialog, DialogSection } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 
 function StatusBadge({ status }: { status?: string | null }) {
   // Shared vocabulary with the sidebar legend: healthy / needs attention.
@@ -52,6 +63,11 @@ export default function AccountsPage() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
+  // Add-method toggle: live login browser vs. pasted cookies.txt.
+  const [addMethod, setAddMethod] = useState<"capture" | "paste">("capture");
+  const [cookiesTxt, setCookiesTxt] = useState("");
+  const [pasting, setPasting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,13 +103,16 @@ export default function AccountsPage() {
     [load],
   );
 
-  const openAdd = (scope: "me" | "ops") => {
+  const openAdd = (scope: "me" | "ops", method: "capture" | "paste" = "capture") => {
     setAddScope(scope);
     setAddName("");
     setCapture(null);
     setAdding(false);
     setAddError(null);
     setWaiting(false);
+    setAddMethod(method);
+    setCookiesTxt("");
+    setPasting(false);
     setAddOpen(true);
   };
 
@@ -102,6 +121,9 @@ export default function AccountsPage() {
     setAddError(null);
     setCapture(null);
     setWaiting(false);
+    setAddMethod("capture");
+    setCookiesTxt("");
+    setPasting(false);
   };
 
   const handleStartCapture = async () => {
@@ -132,6 +154,42 @@ export default function AccountsPage() {
       }
     }
     closeAdd();
+  };
+
+  const handleSaveCookiesTxt = async () => {
+    setAddError(null);
+    if (!addName.trim()) {
+      setAddError("Give the session a name first.");
+      return;
+    }
+    if (!cookiesTxt.trim()) {
+      setAddError("Paste the cookies.txt content (or load a file) first.");
+      return;
+    }
+    setPasting(true);
+    try {
+      await api.addCookiesTxt({
+        name: addName.trim(),
+        scope: addScope,
+        cookies_txt: cookiesTxt,
+      });
+      await load();
+      closeAdd();
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "Could not save the cookies.txt session");
+    } finally {
+      setPasting(false);
+    }
+  };
+
+  const handlePickFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setCookiesTxt(String(reader.result ?? ""));
+    reader.readAsText(file, "utf-8");
+    // Allow re-picking the same file after a failed save.
+    event.target.value = "";
   };
 
   // While a capture is waiting, poll the account list so the new session
@@ -218,6 +276,10 @@ export default function AccountsPage() {
                 Add shared session
               </Button>
             ) : null}
+            <Button type="button" variant="outline" onClick={() => openAdd(isOps ? "ops" : "me", "paste")}>
+              <ClipboardPaste className="h-3.5 w-3.5" aria-hidden="true" />
+              Add Cookies.txt
+            </Button>
             <Button type="button" onClick={() => openAdd("me")}>
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               Add my session
@@ -292,46 +354,156 @@ export default function AccountsPage() {
         description={
           capture
             ? "A one-time login browser is ready — open it to see the live Facebook page and sign in there."
-            : "You'll sign in to Facebook in a new tab on the live page (solving any CAPTCHA there) — only the resulting session cookies are stored with your account, never the password."
+            : addMethod === "paste"
+              ? "Paste a cookies.txt exported from an authenticated Facebook tab — the session cookies are stored with your account."
+              : "You'll sign in to Facebook in a new tab on the live page (solving any CAPTCHA there) — only the resulting session cookies are stored with your account, never the password."
         }
         size="lg"
       >
         {!capture ? (
           <div className="space-y-4">
             <DialogSection>
-              <div className="space-y-1.5">
-                <label htmlFor="add-name" className="text-sm font-medium">
-                  Session name
-                </label>
-                <Input
-                  id="add-name"
-                  value={addName}
-                  onChange={(event) => setAddName(event.target.value)}
-                  placeholder={addScope === "ops" ? "e.g. shared-prod" : "e.g. personal-a"}
-                  required
-                  autoFocus
-                />
-              </div>
-              <p className="text-xs text-ink-muted">
-                Opens Facebook&lsquo;s live login page in a one-time browser hosted by this app — the page and your
-                clicks stream through the app&lsquo;s own connection, so it works from any device with no extra ports.
-                You complete the sign-in; this app only captures the session cookie.
-              </p>
-              {addError ? (
-                <p className="rounded-sm border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
-                  {addError}
-                </p>
-              ) : null}
-              <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="outline" onClick={() => void closeAdd()}>
-                  Cancel
-                </Button>
-                <Button type="button" onClick={() => void handleStartCapture()} disabled={adding || !addName.trim()}>
-                  {adding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-                  {adding ? "Starting browser…" : "Open Facebook login"}
-                </Button>
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="How to add the session">
+                <button
+                  type="button"
+                  aria-pressed={addMethod === "capture"}
+                  onClick={() => setAddMethod("capture")}
+                  className={
+                    "flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-sm font-medium transition-colors " +
+                    (addMethod === "capture"
+                      ? "border-border-strong bg-bg-subtle text-ink"
+                      : "border-border text-ink-muted hover:text-ink")
+                  }
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  Live login (browser)
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={addMethod === "paste"}
+                  onClick={() => setAddMethod("paste")}
+                  className={
+                    "flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-sm font-medium transition-colors " +
+                    (addMethod === "paste"
+                      ? "border-border-strong bg-bg-subtle text-ink"
+                      : "border-border text-ink-muted hover:text-ink")
+                  }
+                >
+                  <ClipboardPaste className="h-3.5 w-3.5" aria-hidden="true" />
+                  Paste cookies.txt
+                </button>
               </div>
             </DialogSection>
+
+            {addMethod === "capture" ? (
+              <DialogSection>
+                <div className="space-y-1.5">
+                  <label htmlFor="add-name" className="text-sm font-medium">
+                    Session name
+                  </label>
+                  <Input
+                    id="add-name"
+                    value={addName}
+                    onChange={(event) => setAddName(event.target.value)}
+                    placeholder={addScope === "ops" ? "e.g. shared-prod" : "e.g. personal-a"}
+                    required
+                    autoFocus
+                  />
+                </div>
+                <p className="text-xs text-ink-muted">
+                  Opens Facebook&lsquo;s live login page in a one-time browser hosted by this app — the page and your
+                  clicks stream through the app&lsquo;s own connection, so it works from any device with no extra ports.
+                  You complete the sign-in; this app only captures the session cookie.
+                </p>
+                {addError ? (
+                  <p className="rounded-sm border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+                    {addError}
+                  </p>
+                ) : null}
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="outline" onClick={() => void closeAdd()}>
+                    Cancel
+                  </Button>
+                  <Button type="button" onClick={() => void handleStartCapture()} disabled={adding || !addName.trim()}>
+                    {adding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                    {adding ? "Starting browser…" : "Open Facebook login"}
+                  </Button>
+                </div>
+              </DialogSection>
+            ) : (
+              <DialogSection>
+                <div className="space-y-1.5">
+                  <label htmlFor="add-name" className="text-sm font-medium">
+                    Session name
+                  </label>
+                  <Input
+                    id="add-name"
+                    value={addName}
+                    onChange={(event) => setAddName(event.target.value)}
+                    placeholder={addScope === "ops" ? "e.g. shared-prod" : "e.g. personal-a"}
+                    required
+                    autoFocus
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="add-cookies-txt" className="text-sm font-medium">
+                    cookies.txt
+                  </label>
+                  <Textarea
+                    id="add-cookies-txt"
+                    value={cookiesTxt}
+                    onChange={(event) => setCookiesTxt(event.target.value)}
+                    rows={10}
+                    placeholder={
+                      "# Netscape HTTP Cookie File\n" +
+                      ".facebook.com\tTRUE\t/\tFALSE\t0\twd\t…\n" +
+                      "#HttpOnly_.facebook.com\tTRUE\t/\tTRUE\t0\tc_user\t…"
+                    }
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="flex items-start gap-3">
+                  <input
+                    ref={fileInputRef}
+                    id="add-cookies-file"
+                    type="file"
+                    accept=".txt,text/plain"
+                    onChange={handlePickFile}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex shrink-0 items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:text-ink"
+                  >
+                    <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+                    Load from file…
+                  </button>
+                  <p className="text-xs text-ink-muted">
+                    Export cookies from an authenticated Facebook tab (e.g. the “Get cookies.txt LOCALLY” extension) and
+                    paste them here — the backend parses them into a saved session.
+                  </p>
+                </div>
+                {addError ? (
+                  <p role="alert" className="rounded-sm border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+                    {addError}
+                  </p>
+                ) : null}
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="outline" onClick={() => void closeAdd()}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleSaveCookiesTxt()}
+                    disabled={pasting || !addName.trim() || !cookiesTxt.trim()}
+                  >
+                    {pasting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                    {pasting ? "Saving session…" : "Save session"}
+                  </Button>
+                </div>
+              </DialogSection>
+            )}
           </div>
         ) : (
           <div className="space-y-4">

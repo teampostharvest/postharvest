@@ -158,6 +158,13 @@ export interface PersonalLoginRequest {
   password: string;
 }
 
+/** Request body for POST /api/accounts/cookies-txt (paste an exported jar). */
+export interface CookiesTxtRequest {
+  name: string;
+  scope: "ops" | "me";
+  cookies_txt: string;
+}
+
 /** Response from POST /api/accounts/capture — the same-origin viewer link to open. */
 export interface SessionCaptureOut {
   capture_id: string;

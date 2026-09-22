@@ -21,6 +21,9 @@ Endpoints
 * POST   /api/accounts/personal             — label + FB credentials → server-side
                                               login, save a personal session (authed)
 * DELETE /api/accounts/{scope}/{name}       — remove a session (scope + role gated)
+* POST   /api/accounts/cookies-txt           — add a session by pasting an exported
+                                              cookies.txt (Netscape format; parsed
+                                              server-side, scope + role rules as above)
 
 Capture viewer (capability-based, same-origin):
 * GET /api/accounts/capture/{id}/viewer           — the live login page viewer
@@ -54,6 +57,7 @@ from backend.models.user import User
 from backend.schemas.accounts import (
     AccountOut,
     AccountsResponse,
+    CookiesTxtRequest,
     PersonalLoginRequest,
     SessionCaptureOut,
     SessionCaptureRequest,
@@ -69,7 +73,13 @@ from backend.scraper.browser_scraper import (
     get_cookie_status,
     list_accounts,
     login_with_credentials,
+    save_cookies,
     start_session_capture,
+)
+from backend.scraper.cookies_txt import (
+    InvalidCookiesTxt,
+    parse_cookies_txt,
+    require_facebook_session,
 )
 
 router = APIRouter(tags=["accounts"])
@@ -361,6 +371,65 @@ def cancel_capture(
     and cleans up. Unknown or already-finished captures are a no-op 204."""
     cancel_session_capture(capture_id)
     return Response(status_code=204)
+
+
+@router.post(
+    "/accounts/cookies-txt",
+    response_model=AccountOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a saved Facebook session by pasting cookies.txt",
+)
+def add_account_from_cookies_txt(
+    payload: CookiesTxtRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountOut:
+    """Parse an exported cookies.txt (Netscape format) into a saved session.
+
+    Scope rules match the rest of the API: ``me`` is open to any signed-in
+    user (plan-capped); ``ops`` requires the ops role and targets the shared
+    pool. The raw cookies.txt is never stored — only the parsed jar, persisted
+    through the same ``save_cookies`` path as every other capture.
+    """
+    name = payload.name.strip()
+    if not name:
+        raise AppError("Account name cannot be empty", status_code=400, code="invalid_input")
+
+    if payload.scope == "ops":
+        if current_user.role != "ops":
+            raise AppError(
+                "Only operators may add shared sessions",
+                status_code=403,
+                code="admin_required",
+            )
+        owner_id = None
+    else:
+        cap = personal_account_cap(current_user.plan)
+        if cap is not None and len(list_accounts(owner_id=current_user.id)) >= cap:
+            raise AppError(
+                f"Your {current_user.plan} plan allows {cap} personal account(s); "
+                "delete one or upgrade to add more",
+                status_code=429,
+                code="plan_limit",
+            )
+        owner_id = current_user.id
+
+    try:
+        cookies = parse_cookies_txt(payload.cookies_txt)
+        require_facebook_session(cookies)
+    except InvalidCookiesTxt as exc:
+        raise AppError(str(exc), status_code=400, code="invalid_cookies_file") from exc
+
+    save_cookies(cookies, account_name=name, owner_id=owner_id)
+
+    item = next((i for i in account_metadata(owner_id=owner_id) if i["name"] == name), None)
+    if item is None:
+        raise AppError(
+            "Cookies were parsed but the session was not saved",
+            status_code=500,
+            code="cookie_save_failed",
+        )
+    return _account_out(item, payload.scope, owner_id)
 
 
 @router.websocket("/accounts/capture/{capture_id}/cdp")
