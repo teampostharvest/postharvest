@@ -14,6 +14,7 @@ import { closeRedis, getRedis, type RedisClient } from "./redis.js";
 import { LocalTokenBucket, RedisTokenBucket, type Bucket } from "./fetch/rate-limiter.js";
 import { RobotsTxtPolicy, type RobotsPolicy } from "./fetch/robots.js";
 import { fetchPage, type FetchPageOptions, type FetchResult } from "./fetch/http-mode.js";
+import type { BrowserOpenFn } from "./browser-mode/types.js";
 
 export interface BuildAppOptions {
   config?: Config;
@@ -21,6 +22,7 @@ export interface BuildAppOptions {
   limiter?: Bucket;
   robots?: RobotsPolicy;
   fetchImpl?: (url: string, opts: FetchPageOptions) => Promise<FetchResult>;
+  browserOpen?: BrowserOpenFn;
 }
 
 export interface BuiltApp {
@@ -66,6 +68,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     robots,
     limiter,
     fetchImpl: opts.fetchImpl,
+    browserOpen: opts.browserOpen,
   });
 
   return { app, config, redis };

@@ -5,6 +5,11 @@ import { FetchError } from "../src/errors.js";
 import type { FetchResult } from "../src/fetch/http-mode.js";
 import type { RobotsDecision, RobotsPolicy } from "../src/fetch/robots.js";
 import type { BuiltApp } from "../src/server.js";
+import type {
+  BrowserOpenFn,
+  CapturePage,
+  CaptureSession,
+} from "../src/browser-mode/types.js";
 
 const config = loadConfig({ REDIS_URL: "", SCRAPER_ROBOTS: "0" });
 
@@ -50,6 +55,46 @@ async function withApp(
     ...overrides,
   });
   return built;
+}
+
+/**
+ * A page whose inspectable in-page scripts are dispatched by source and return
+ * deterministic "empty page" values, so the real capture loop runs hermetically
+ * without a browser: no posts, no graphql bodies, no login wall.
+ */
+function stubPage(finalDom = "<div>final</div>"): CapturePage {
+  return {
+    goto: vi.fn(async () => {}),
+    waitForTimeout: vi.fn(async () => {}),
+    url: vi.fn(() => FB_URL),
+    content: vi.fn(async () => finalDom),
+    evaluate: (async (fn: unknown) => {
+      const src = String(fn);
+      if (src.includes("window.scrollTo")) return undefined;
+      if (src.includes('input[name="email"]')) {
+        return { url: FB_URL, hasLoginForm: false, isLoginPage: false };
+      }
+      if (src.includes('[role="tab"]')) return false;
+      if (src.includes("data-ad-preview")) {
+        return [] as Array<{ html: string; text: string; aria: string }>;
+      }
+      if (src.includes('querySelectorAll("script")')) return [] as string[];
+      return undefined;
+    }) as CapturePage["evaluate"],
+    on: vi.fn(),
+    querySelector: vi.fn(async () => null),
+    click: vi.fn(async () => {}),
+  } as unknown as CapturePage;
+}
+
+function fakeBrowser(
+  session?: Partial<CaptureSession>,
+): BrowserOpenFn {
+  return vi.fn(async () => ({
+    newPage: vi.fn(async () => stubPage()),
+    close: vi.fn(async () => {}),
+    ...session,
+  }));
 }
 
 describe("POST /fetch", () => {
@@ -103,15 +148,87 @@ describe("POST /fetch", () => {
     await app.close();
   });
 
-  it("returns 501 for browser mode (not implemented yet)", async () => {
-    const { app } = await withApp();
+  it("browser mode returns a captured snapshot with canonical stats", async () => {
+    const { app } = await withApp({ browserOpen: fakeBrowser() });
     const res = await app.inject({
       method: "POST",
       url: "/fetch",
       payload: { target_url: FB_URL, mode: "browser" },
     });
-    expect(res.statusCode).toBe(501);
-    expect(res.json().error.code).toBe("browser_mode_not_implemented");
+    expect(res.statusCode).toBe(200);
+    const json = res.json();
+    expect(json.content_type).toBe("text/html");
+    // Canonical FetchResponse shape (§6): repeated -> [] until cookie support.
+    expect(json.updated_cookies).toEqual([]);
+    expect(json.browser_stats).toEqual({
+      login_wall: false,
+      feed_missing: true, // no /api/graphql/ bodies in this fake capture
+      posts_found: 0,
+    });
+    // The fake capture ran the whole loop against an empty page.
+    expect(Buffer.from(json.raw_payload, "base64").toString("utf8")).toBe(
+      "<html><body><!-- fb-scrape-feed-missing --><div>final</div></body></html>",
+    );
+    await app.close();
+  });
+
+  it("browser mode forwards session cookies to browserOpen (Slice C)", async () => {
+    const browserOpen = fakeBrowser();
+    const { app } = await withApp({ browserOpen });
+    const res = await app.inject({
+      method: "POST",
+      url: "/fetch",
+      payload: {
+        target_url: FB_URL,
+        mode: "browser",
+        cookies: [
+          "c_user=100000000000001; Domain=.facebook.com; Path=/; HttpOnly",
+          "xs=abc123def456; Domain=.facebook.com; Path=/; Secure; HttpOnly",
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(browserOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cookies: [
+          "c_user=100000000000001; Domain=.facebook.com; Path=/; HttpOnly",
+          "xs=abc123def456; Domain=.facebook.com; Path=/; Secure; HttpOnly",
+        ],
+      }),
+    );
+    await app.close();
+  });
+
+  it("browser mode maps a launch failure to 500 browser_launch_failed", async () => {
+    const browserOpen: BrowserOpenFn = vi.fn(async () => {
+      throw new Error("chromium missing");
+    });
+    const { app } = await withApp({ browserOpen });
+    const res = await app.inject({
+      method: "POST",
+      url: "/fetch",
+      payload: { target_url: FB_URL, mode: "browser" },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error.code).toBe("browser_launch_failed");
+    await app.close();
+  });
+
+  it("browser mode maps a page failure to 500 browser_capture_failed", async () => {
+    const browserOpen: BrowserOpenFn = vi.fn(async () => ({
+      newPage: vi.fn(async () => {
+        throw new Error("page crashed");
+      }),
+      close: vi.fn(async () => {}),
+    }));
+    const { app } = await withApp({ browserOpen });
+    const res = await app.inject({
+      method: "POST",
+      url: "/fetch",
+      payload: { target_url: FB_URL, mode: "browser" },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error.code).toBe("browser_capture_failed");
     await app.close();
   });
 
