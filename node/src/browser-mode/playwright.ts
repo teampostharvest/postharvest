@@ -12,6 +12,7 @@
  */
 
 import { chromium, type Browser, type Route } from "playwright-core";
+import { existsSync, accessSync, constants } from "node:fs";
 import { parseCookieLines } from "./cookies.js";
 import type {
   BrowserOpenOptions,
@@ -19,13 +20,46 @@ import type {
   CaptureSession,
 } from "./types.js";
 
+/**
+ * Resolve a Chromium binary the way the E2E suite does: honour an explicit
+ * `executablePath` first, then env (`PLAYWRIGHT_CHROMIUM` / `CHROME_BIN`),
+ * then well-known system locations.  Returns null when only a bundled
+ * Playwright browser could work — chromium.launch then falls back to the
+ * framework default, which is correct for images that ran
+ * `npx playwright install chromium`.
+ */
+function resolveBrowser(opts: BrowserOpenOptions): string | undefined {
+  if (opts.executablePath) return opts.executablePath;
+  const candidates = [
+    process.env.PLAYWRIGHT_CHROMIUM,
+    process.env.CHROME_BIN,
+    "/usr/sbin/google-chrome-stable",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ].filter((p): p is string => Boolean(p));
+  for (const path of candidates) {
+    if (existsSync(path)) {
+      try {
+        accessSync(path, constants.X_OK);
+        return path;
+      } catch {
+        // not executable — try the next candidate
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function openBrowser(
   opts: BrowserOpenOptions,
 ): Promise<CaptureSession> {
+  const executablePath = resolveBrowser(opts);
   const browser: Browser = await chromium.launch({
     headless: true,
     args: opts.launchArgs,
-    ...(opts.executablePath ? { executablePath: opts.executablePath } : {}),
+    ...(executablePath ? { executablePath } : {}),
     ...(opts.channel ? { channel: opts.channel } : {}),
   });
   const context = await browser.newContext({
