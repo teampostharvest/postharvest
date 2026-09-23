@@ -91,6 +91,14 @@ export interface ParseRequest {
   raw_payload: string; // base64
   content_type: "html" | "graphql_json";
   idempotency_key: string;
+  /**
+   * Page URL used for link resolution + normalization's facebook_url
+   * context (pass the final URL after redirects, like the Python crawler
+   * passes fetch_result.final_url to parse_page).
+   */
+  target_url?: string | null;
+  /** Page handle — page_name fallback when the markup has none. */
+  handle?: string | null;
 }
 
 /** go -> FastAPI. */

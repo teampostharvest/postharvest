@@ -107,11 +107,16 @@ type FetchResponse struct {
 
 // ParseRequest is FastAPI -> go. RawPayload is base64 of the raw body bytes;
 // ContentType is "html" | "graphql_json"; IdempotencyKey is job_id + ":" +
-// source_id — finalplanv2.md §8(c).
+// source_id — finalplanv2.md §8(c). TargetURL is the page URL used for link
+// resolution and normalization's facebook_url context (pass the final URL
+// after redirects, like Python's crawler passes final_url to parse_page);
+// Handle is the page handle, a page_name fallback when markup has none.
 type ParseRequest struct {
 	RawPayload     string `json:"raw_payload"`
 	ContentType    string `json:"content_type"`
 	IdempotencyKey string `json:"idempotency_key"`
+	TargetURL      string `json:"target_url"`
+	Handle         string `json:"handle"`
 }
 
 // ParseResponse is go -> FastAPI (mirrors the .proto message). Posts are the

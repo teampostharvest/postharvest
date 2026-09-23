@@ -115,4 +115,36 @@ describe("shared/fixtures contract", () => {
     expect(Array.isArray(fixture.cookies)).toBe(true);
     expect(fixture.cookies?.length).toBe(2);
   });
+
+  it("ParseRequest html fixture carries page context for the Go worker", () => {
+    const fixture = loadFixture<Record<string, unknown>>(
+      "parse_request.html.json",
+    );
+    expectExactKeys(fixture, [
+      "raw_payload",
+      "content_type",
+      "idempotency_key",
+      "target_url",
+      "handle",
+    ]);
+    expect(fixture.content_type).toBe("html");
+    expect(fixture.idempotency_key).toBe("job_7:acmewidgets_1");
+    expect(fixture.target_url).toBe("https://www.facebook.com/acmewidgets");
+    expect(fixture.handle).toBe("acmewidgets");
+    // Consistency rule (shared/fixtures/README.md): raw_payload decodes to
+    // the exact bytes of golang/parser/testdata/dom_sample.html.
+    const decoded = Buffer.from(String(fixture.raw_payload), "base64");
+    const dom = readFileSync(
+      path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "..",
+        "golang",
+        "parser",
+        "testdata",
+        "dom_sample.html",
+      ),
+    );
+    expect(decoded.equals(dom)).toBe(true);
+  });
 });

@@ -199,6 +199,22 @@ func pythonDictString(post map[string]interface{}) (string, error) {
 	return b.String(), nil
 }
 
+// PythonJSON serializes one scalar exactly like Python json.dumps(v,
+// ensure_ascii=False): no HTML escaping, non-ASCII raw, no trailing newline.
+// Exported for the HTTP layer (golang/httpapi) so wire responses are
+// byte-consistent with what a Python emitter would produce.
+func PythonJSON(v interface{}) (string, error) {
+	return marshalPythonJSON(v)
+}
+
+// PostDictString renders one post dict in the 33-key schema order with
+// Python's default separators (', ', ': ') and no ASCII escaping — the exact
+// bytes json.dumps(post, ensure_ascii=False) produces for one canonical post.
+// Exported for the HTTP layer (golang/httpapi) ParseResponse output.
+func PostDictString(post map[string]interface{}) (string, error) {
+	return pythonDictString(post)
+}
+
 // WriteJSONL mirrors jsonl_exporter.export_jsonl: one JSON object per line
 // (pythonDictString byte-exact), trailing "\n", UTF-8 no BOM.
 func WriteJSONL(w io.Writer, posts []map[string]interface{}) error {

@@ -141,6 +141,13 @@ message ParseRequest {
   bytes raw_payload = 1;
   string content_type = 2;   // "html" | "graphql_json"
   string idempotency_key = 3; // job_id + ":" + source_id — finalplanv2.md §8(c)
+  // Page context — the Python crawler passes these today
+  // (parse_page(page_url=final_url, handle=...); normalize facebook_url is
+  // the same page URL). Without them the worker cannot make relative
+  // permalinks absolute or fall back to the handle as page_name. Pass the
+  // final URL after redirects, exactly like crawler.py's fetch_result.final_url.
+  string target_url = 4;     // page URL for link resolution + facebook_url context
+  string handle = 5;         // page handle — page_name fallback when markup has none
 }
 
 message ParseResponse {

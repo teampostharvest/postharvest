@@ -19,12 +19,15 @@ change in one language cannot silently drift from the others.
 | `fetch_request.browser.json` | `FetchRequest` | Browser-mode request with session cookie lines, scroll budget and post quota. |
 | `fetch_response.html.json` | `FetchResponse` | Canonical http-mode response: `updated_cookies: []`, `browser_stats: null` (proto3 JSON defaults). |
 | `fetch_response.browser.json` | `FetchResponse` | Browser-mode response: assembled snapshot in `raw_payload` (base64), capture summary in `browser_stats`, refreshed session in `updated_cookies`. |
+| `parse_request.html.json` | `ParseRequest` | HTML-mode parse request: `raw_payload` base64-encodes `golang/parser/testdata/dom_sample.html`, with page context (`target_url`, `handle`) and an `idempotency_key`. |
 | `browser_snapshot.html` | (asset) | The exact bytes that `fetch_response.browser.json`'s `raw_payload` base64-encodes. Mirrors the snapshot format produced by the Python `fetch_with_browser` (dom pool + script pool + `data-fb-graphql-feed` blocks + final DOM) so the parser path is identical. |
 
 ## Consistency rules enforced by tests
 
 - `fetch_response.browser.json` → `raw_payload` base64-decodes to the exact
   bytes of `browser_snapshot.html` (Node and backend suites both assert this).
+- `parse_request.html.json` → `raw_payload` base64-decodes to the exact bytes
+  of `golang/parser/testdata/dom_sample.html` (Go contract suites assert this).
 - `fetch_response.html.json` must keep `updated_cookies: []` and
   `browser_stats: null`; node's `/fetch` http-mode response must match that
   canonical shape exactly (key-for-key).

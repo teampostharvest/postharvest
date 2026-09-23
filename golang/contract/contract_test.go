@@ -26,6 +26,7 @@ const (
 	fetchResponseHTMLFixture    = "fetch_response.html.json"
 	fetchResponseBrowserFixture = "fetch_response.browser.json"
 	fetchRequestBrowserFixture  = "fetch_request.browser.json"
+	parseRequestHTMLFixture     = "parse_request.html.json"
 	parseResponsePostsFixture   = "parse_response.posts.json"
 	browserSnapshotAsset        = "browser_snapshot.html"
 )
@@ -228,6 +229,43 @@ func TestPostFieldNumbersAreContiguous13To33InKeyOrder(t *testing.T) {
 			t.Fatalf("PostFieldNumbers[%d].Name = %q, want %q (NORMALIZED_KEYS order)",
 				i, fk.Name, worker.NORMALIZED_KEYS[i])
 		}
+	}
+}
+
+func TestParseRequestHTMLFixtureCarriesPageContext(t *testing.T) {
+	var m map[string]any
+	if err := json.Unmarshal(loadFixture(t, parseRequestHTMLFixture), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	exactKeys(t, m, []string{
+		"raw_payload", "content_type", "idempotency_key", "target_url", "handle",
+	})
+
+	req := decodeFixture[ParseRequest](t, parseRequestHTMLFixture)
+	if req.ContentType != "html" {
+		t.Fatalf("content_type = %q, want html", req.ContentType)
+	}
+	if req.IdempotencyKey != "job_7:acmewidgets_1" {
+		t.Fatalf("idempotency_key = %q", req.IdempotencyKey)
+	}
+	if req.TargetURL != "https://www.facebook.com/acmewidgets" {
+		t.Fatalf("target_url = %q", req.TargetURL)
+	}
+	if req.Handle != "acmewidgets" {
+		t.Fatalf("handle = %q", req.Handle)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(req.RawPayload)
+	if err != nil || len(decoded) == 0 {
+		t.Fatalf("raw_payload is not valid non-empty base64 (err=%v)", err)
+	}
+	// Consistency rule (shared/fixtures/README.md): raw_payload decodes to
+	// the exact bytes of golang/parser/testdata/dom_sample.html.
+	dom, err := os.ReadFile(filepath.Join("..", "parser", "testdata", "dom_sample.html"))
+	if err != nil {
+		t.Fatalf("read dom_sample.html: %v", err)
+	}
+	if !reflect.DeepEqual(decoded, dom) {
+		t.Fatal("parse_request.html.json raw_payload must decode to the exact dom_sample.html bytes")
 	}
 }
 
