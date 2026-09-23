@@ -53,6 +53,36 @@ from .parser import parse_page
 from .stats import Stats
 from .url_validator import validate_or_raise
 
+# -- C hermetic runtime-cache consult seam (plan §8 "snappy" cache) --------
+# Hermetic-default: **disarmed** (``_SCRAPE_TTL_CONSULT is None``) so the
+# pre-existing node-browser suite keeps every ``== N`` byte untouched
+# (add-don't-replace, same mold as the Local/Redis bucket arming pair).
+# The hermetic C-paper (``tests/test_scrape_ttl_cache_hermetic.py``) arms
+# this consult via ``monkeypatch`` — never via env / ``settings``.
+_SCRAPE_TTL_CONSULT = None  # armed to a ``TTLCache`` by the hermetic suite
+
+
+def _ttl_consult(normalized_url: str):
+    """Serve the node leg's payload from the TTL window if armed+fresh.
+
+    The byte C seals: two identical ``scrape_source`` calls within the TTL
+    window → the node seam is visited EXACTLY ONCE; the 2nd identical call
+    is served byte-equal from this hermetic consult (never re-visiting
+    ``_node_fetch_page`` at :316).  Disarmed default → legacy byte-for-byte.
+    """
+    consult = _SCRAPE_TTL_CONSULT
+    if consult is None:
+        return None
+    return consult.get(normalized_url)
+
+
+def _ttl_store(normalized_url: str, payload) -> None:
+    """Write the node leg's payload into the armed TTL window (no-op off)."""
+    consult = _SCRAPE_TTL_CONSULT
+    if consult is not None:
+        consult.set(normalized_url, payload)
+
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -313,7 +343,16 @@ def scrape_source(
             # legacy Fetcher. Parsing/normalization/dedup are identical for
             # both paths.
             if _node_enabled():
-                fetch = _node_fetch_page(normalized_url, cancel_event)
+                cached_fetch = _ttl_consult(normalized_url)
+                if cached_fetch is not None:
+                    # C: identical scrape within the TTL window is served
+                    # byte-equal from the hermetic runtime cache — the node
+                    # seam is NOT re-visited (byte: ``== 1`` across two
+                    # identical ``scrape_source`` calls).
+                    fetch = cached_fetch
+                else:
+                    fetch = _node_fetch_page(normalized_url, cancel_event)
+                    _ttl_store(normalized_url, fetch)
             else:
                 fetch = fetcher.fetch_page(normalized_url)
             logger.info(
