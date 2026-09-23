@@ -8,6 +8,7 @@
 #        frontend http://localhost:3000  (next dev, hot reload)
 #        redis    internal (shared rate-limit store)
 #        node     internal (facebook-facing fetch service)
+#        go       internal (idempotency cache in redis; USE_GO_WORKER off)
 #
 #   PRODUCTION (this file, nginx via --profile prod; override ignored):
 #     docker compose -f docker-compose.yml -f docker-compose.prod.yml \
@@ -15,11 +16,11 @@
 #     -> nginx     :80/:443
 #          /api/*  -> backend  (:8000 FastAPI)
 #          /       -> frontend (:3000 Next.js standalone)
-#        redis, node   internal, isolated network
+#        redis, node, go   internal, isolated network
 #
 # Service wiring:
 #   web       network: nginx, frontend, backend, node   (browser-facing path)
-#   isolated  network: backend, node, redis             (internal: no route out)
+#   isolated  network: backend, node, go, redis         (internal: no route out)
 #
 # The database is managed Supabase (SUPABASE_DB_URL), NOT a compose service.
 # Playwright/Chromium is baked into the backend image; job state is in-process
@@ -122,6 +123,12 @@ services:
       # browser_scraper (independent of USE_NODE).
       USE_NODE_BROWSER: ${USE_NODE_BROWSER:-0}
       NODE_BASE_URL: ${NODE_BASE_URL:-http://node:9334}
+      # go compute seam (finalplanv2 §5/§14, M7): when USE_GO_WORKER=1 the
+      # backend delegates the compute slice (parse -> normalize -> dedup) to
+      # the go worker's POST /v1/parse.  Stays 0 by default — flips only
+      # after parity is proven (same discipline as USE_NODE).
+      USE_GO_WORKER: ${USE_GO_WORKER:-0}
+      GO_WORKER_BASE_URL: ${GO_WORKER_BASE_URL:-http://go:8080}
       # Runtime TTL cache (finalplanv2 §8, slice C): >0 arms the backend's
       # in-process node-fetch consult seam for that many seconds per URL.
       # 0 (default) keeps it DISARMED — prod parity with the hermetic suites.
@@ -242,6 +249,35 @@ services:
     stop_grace_period: 10s
     networks:
       - web
+      - isolated
+
+  # =====================================================================
+  # go — compute worker (finalplanv2 §5, §8(c))
+  # Stateless pure compute: POST /v1/parse + /healthz + /readyz, no
+  # Facebook-facing traffic, no DB, no browser.  Internal-only: backend
+  # reaches it at http://go:8080 once USE_GO_WORKER flips.  The optional
+  # §8(c) idempotency cache lives in the shared Redis — a Redis outage is a
+  # per-request best-effort miss, never a hard dependency (availability over
+  # dedup), hence `service_started` like node.
+  # =====================================================================
+  go:
+    build:
+      # Self-contained context: golang/Dockerfile assumes golang/ as root.
+      context: ../golang
+      dockerfile: Dockerfile
+    image: postharvest-go:latest
+    container_name: postharvest-go
+    init: true
+    environment:
+      PORT: "8080"
+      # Unset/empty => single-shot mode (no cache); set => redis-backed.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    stop_grace_period: 10s
+    networks:
       - isolated
 
   # =====================================================================

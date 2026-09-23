@@ -1,10 +1,10 @@
 // Package documentation: pin-notes for the runtime libraries plan §5 names.
 //
 // THESE ARE NOTES ONLY plus the already-vendored exceptions (goquery,
-// excelize).  Nothing else here is imported or fetched: slice A is hermetic
-// (zero network / zero go-get), so only the stdlib + vendored deps are used.
-// When a real deployment slice asks for the pinned versions, these are the
-// exact versions the plan locks:
+// excelize, go-redis).  The core slice A is hermetic (in-memory idempotency
+// store + stdlib-only parse pipeline + the vendored goquery for HTML) and
+// byte-proven under `GOPROXY=off`; the deployment slice adds go-redis behind
+// the same Store seam.  The pinned versions are exactly what the plan locks:
 //
 //   - github.com/PuerkitoBio/goquery v1.9.2   (HTML parse, BeautifulSoup eq;
 //     VENDORED from M2 — golang/parser depends on it)
@@ -15,9 +15,11 @@
 //     resolves.  v2.11.0+ is the CVE-locked line either way: MUST stay
 //     >=2.11.0 for CVE-2026-59161, CVE-2026-59162, CVE-2026-54063.)
 //   - github.com/redis/go-redis/v9             (§8(c) idempotency cache;
-//     golang/idempotency exposes the Store seam — the hermetic proofs run
-//     against its in-memory Memory store, so wiring Redis later must not
-//     change the cached ParseResponse bytes or the retry-safety semantics)
+//     VENDORED from M6 — golang/idempotency/redis_store.go implements the
+//     Store seam against it.  The hermetic proofs still run against the
+//     in-memory Memory store (and a recording double for the redis store);
+//     wiring Redis did not change the cached ParseResponse bytes or the
+//     retry-safety semantics.)
 //   - github.com/go-chi/chi                     (Phase-1 HTTP router)
 //   - golang.org/x/sync/errgroup                (bounded concurrency)
 //   - github.com/stretchr/testify               (assertions, when network is

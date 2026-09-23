@@ -94,20 +94,34 @@ repo's bytes at slice-A time:
 * no team/ownership or audit reason on record.
 
 Slice A was nevertheless authored now **because the user explicitly asked**
-("go on do the rest … START GO WORKER PLS").  It is therefore strictly the
-hermetic, non-deployable compute core: the exact Go code the plan's §12
-would run, proven byte-equal to Python, with **no container, no feature
-flag flip, no deployment**.  Milestones M2/M3/M4/M5 added the parser port
-(`golang/parser/`, byte-vs-`parser.py` goldens), the Phase-1 HTTP surface
-(`golang/httpapi/`: `POST /v1/parse` plus `/healthz`/`/readyz`, byte-vs-real
-Python-Pipeline goldens), the §8(c) idempotency seam (`golang/idempotency/`:
-`Store` interface + in-memory implementation; Redis stays a
-`dep_notes.go` pin until a deployment slice asks), and the XLSX exporter
-(`export_xlsx.go`, cell-model-vs-real-openpyxl goldens; excelize was the
-second and last network fetch of the slice, required by §5's pin and
-vendored) — still hermetic (`httptest`, no sockets) and still
-unwired: nothing calls it over a socket and FastAPI's flagged Python client
-is milestone M7.  The §15 gate still holds for anything operational; this
-scaffolding only removes the "zero `.go` files" gap so that when a trigger
-fires, the Go side is already byte-proven against Python rather than
-greenfield.
+("go on do the rest … START GO WORKER PLS").  Milestones M2/M3/M4/M5 built
+the byte-proven core: the parser port (`golang/parser/`, byte-vs-`parser.py`
+goldens), the Phase-1 HTTP surface (`golang/httpapi/`: `POST /v1/parse` plus
+`/healthz`/`/readyz`, byte-vs-real-Python-Pipeline goldens), the §8(c)
+idempotency seam (`golang/idempotency/`: `Store` interface + in-memory
+implementation), and the XLSX exporter (`export_xlsx.go`,
+cell-model-vs-real-openpyxl goldens; excelize was the second network fetch
+of the slice, required by §5's pin and vendored).
+
+**M6 (deployment slice) and M7 (FastAPI flagged client) then made it
+deployable *in code*, with zero live exposure:**
+
+* **M7** — `backend/services/go_worker.py` is the FastAPI→Go seam behind the
+  `USE_GO_WORKER` flag (default off, same discipline as `USE_NODE`): when
+  flipped, HTTP-mode scrapes route the compute slice (parse → normalize →
+  dedup) through `POST /v1/parse` instead of in-process Python, proven
+  byte-parity against the real pipeline in `tests/test_go_worker_seam.py`.
+* **M6** — the deployables exist in the repo: `cmd/server/main.go` (one
+  binary mounting `httpapi.NewHandler` with a `PORT` env and an optional
+  `REDIS_URL`-armed §8(c) cache), `golang/Dockerfile` (static, non-root,
+  hermetic build with `-mod=vendor`), and the `go:` compose service
+  (internal-only, `isolated` network, `http://go:8080`) with backend env
+  `USE_GO_WORKER`/`GO_WORKER_BASE_URL`.  The Redis store
+  (`golang/idempotency/redis_store.go`) is the deployment `Store`
+  implementation over the vendored `github.com/redis/go-redis/v9`, proven
+  hermetically against a recording double.
+
+The §15 gate still holds for **anything operational**: no live image, no
+compose up, no flag flip.  The uniqueness is that when a trigger finally
+fires, the Go side is already byte-proven against Python, container-ready,
+and behind the same flag discipline as the node seam — not greenfield.
