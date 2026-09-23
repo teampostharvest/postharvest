@@ -13,7 +13,7 @@
 
 import { chromium, type Browser, type Route } from "playwright-core";
 import { existsSync, accessSync, constants } from "node:fs";
-import { parseCookieLines } from "./cookies.js";
+import { parseCookieLines, serializeCookies } from "./cookies.js";
 import type {
   BrowserOpenOptions,
   CapturePage,
@@ -114,5 +114,24 @@ export async function openBrowser(
     newPage: async (): Promise<CapturePage> =>
       (await context.newPage()) as unknown as CapturePage,
     close: closeOnce,
+    // Slice C refresh: hand the post-capture session back to FastAPI as RFC
+    // 6265 lines on FetchResponse.updated_cookies.  Playwright cookie objects
+    // map 1:1 onto the wire format (expires -1 = session, no Expires= attr).
+    dumpCookies: async (): Promise<string[]> => {
+      const raw = await context.cookies();
+      return serializeCookies(
+        raw.map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          ...(c.expires !== undefined && c.expires > 0
+            ? { expires: c.expires }
+            : {}),
+          httpOnly: c.httpOnly,
+          secure: c.secure,
+        })),
+      );
+    },
   };
 }

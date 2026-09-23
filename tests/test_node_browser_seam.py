@@ -39,6 +39,7 @@ from backend.services.node_browser import (
     NodeBrowserClient,
     fetch_browser_via_node,
     serialize_cookies,
+    deserialize_cookies,
 )
 
 from helpers import wait_for_job
@@ -233,6 +234,51 @@ class TestSerializeCookies:
         )
         assert lines == ["k=v; Domain=.facebook.com; Path=/"]
 
+    def test_deserialize_round_trips_golden_session_lines(self):
+        jar = deserialize_cookies(SESSION_LINES)
+        assert serialize_cookies(jar) == SESSION_LINES
+
+    def test_deserialize_restores_jar_shape_with_flags(self):
+        jar = deserialize_cookies(
+            ["xs=abc123def456; Domain=.facebook.com; Path=/; Secure; HttpOnly"]
+        )
+        assert jar == [
+            {
+                "name": "xs",
+                "value": "abc123def456",
+                "domain": ".facebook.com",
+                "path": "/",
+                "expires": -1,
+                "httpOnly": True,
+                "secure": True,
+            }
+        ]
+
+    def test_deserialize_keeps_persistent_expiry(self):
+        jar = deserialize_cookies(
+            ["datr=abc; Domain=.facebook.com; Path=/; Expires=1758432025; Secure"]
+        )
+        assert jar == [
+            {
+                "name": "datr",
+                "value": "abc",
+                "domain": ".facebook.com",
+                "path": "/",
+                "expires": 1758432025,
+                "httpOnly": False,
+                "secure": True,
+            }
+        ]
+
+    def test_deserialize_drops_malformed_lines(self):
+        assert deserialize_cookies(["garbage", "", "=novalue; Domain=.facebook.com"]) == []
+        assert deserialize_cookies([]) == []
+
+    def test_deserialize_flag_booleans_follow_wire_absence(self):
+        jar = deserialize_cookies(["k=v; Domain=.facebook.com; Path=/"])
+        assert jar[0]["secure"] is False
+        assert jar[0]["httpOnly"] is False
+
 
 # ---------------------------------------------------------------------------
 # Client contract (MockTransport, no I/O)
@@ -250,7 +296,7 @@ class TestNodeBrowserClient:
             return httpx.Response(200, json=_browser_success(_target_of(req)))
 
         client = _mock_client(handler)
-        html, stats = client.capture(
+        html, stats, updated = client.capture(
             "https://www.facebook.com/NASA",
             account_id="ops:maverick",
             scroll_rounds=12,
@@ -292,7 +338,7 @@ class TestNodeBrowserClient:
             return httpx.Response(200, json=resp)
 
         client = _mock_client(handler)
-        _html, stats = client.capture("https://www.facebook.com/X")
+        _html, stats, _updated = client.capture("https://www.facebook.com/X")
         assert stats == {"login_wall": True, "feed_missing": True, "posts_found": 0}
 
     def test_malformed_success_raises_network_error(self):
@@ -358,7 +404,7 @@ class TestNodeBrowserClient:
             return httpx.Response(200, json=_browser_success(_target_of(req)))
 
         client = _mock_client(handler)
-        html, _stats = client.capture("https://www.facebook.com/X")
+        html, _stats, _updated = client.capture("https://www.facebook.com/X")
         expected_html = base64.b64decode(
             BROWSER_RESPONSE["raw_payload"]
         ).decode("utf-8")
@@ -458,6 +504,177 @@ class TestFetchBrowserViaNode:
             use_cookies=True,
             client=client,
         )
+
+
+# ---------------------------------------------------------------------------
+# Slice C self-heal persist gate (falsy branches must never touch the jar)
+# ---------------------------------------------------------------------------
+
+
+class TestBrowserPersistGate:
+    """Hermetic proofs that ``_persist_refreshed_cookies`` only fires for a
+    genuine saved-session capture that cleared the login wall.
+
+    The gate (``backend/services/node_browser.py``) is::
+
+        if use_cookies and cookies and updated and not stats.get("login_wall"):
+            _persist_refreshed_cookies(updated, account_name, owner_id)
+
+    Four branches make it falsy — anonymous run, no saved jar, no refreshed
+    cookies in the node response, and a login wall — and in every one the
+    saved jar MUST be left untouched (an anonymous/wall capture must never
+    clobber a saved session).  ``_persist_refreshed_cookies`` is recorder-
+    faked so no DB access ever happens here; only "was it called at all" and
+    "with exactly which refreshed lines" are proven.
+    """
+
+    def test_persist_skipped_when_anonymous_use_cookies_false(
+        self, monkeypatch
+    ):
+        recorder = {"calls": []}
+        monkeypatch.setattr(
+            "backend.services.node_browser._persist_refreshed_cookies",
+            lambda *a, **k: recorder["calls"].append(a),
+        )
+
+        def handler(req: httpx.Request):
+            body = json.loads(req.content.decode())
+            assert body["cookies"] == []
+            assert body["account_id"] == ""
+            return httpx.Response(200, json=_browser_success(_target_of(req)))
+
+        client = _mock_client(handler)
+        html, _stats = fetch_browser_via_node(
+            "https://www.facebook.com/TestPage",
+            account_name="maverick",
+            owner_id=None,
+            use_cookies=False,
+            client=client,
+        )
+        assert html
+        assert recorder["calls"] == []
+
+    def test_persist_skipped_when_jar_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            "backend.scraper.browser_scraper.load_cookies", lambda *a, **k: None
+        )
+        recorder = {"calls": []}
+        monkeypatch.setattr(
+            "backend.services.node_browser._persist_refreshed_cookies",
+            lambda *a, **k: recorder["calls"].append(a),
+        )
+
+        def handler(req: httpx.Request):
+            body = json.loads(req.content.decode())
+            assert body["cookies"] == []
+            assert body["account_id"] == ""
+            return httpx.Response(200, json=_browser_success(_target_of(req)))
+
+        client = _mock_client(handler)
+        fetch_browser_via_node(
+            "https://www.facebook.com/TestPage",
+            account_name="maverick",
+            owner_id=None,
+            use_cookies=True,
+            client=client,
+        )
+        assert recorder["calls"] == []
+
+    def test_persist_skipped_when_updated_cookies_empty(self, monkeypatch):
+        monkeypatch.setattr(
+            "backend.scraper.browser_scraper.load_cookies",
+            lambda *a, **k: list(SESSION_JAR),
+        )
+        recorder = {"calls": []}
+        monkeypatch.setattr(
+            "backend.services.node_browser._persist_refreshed_cookies",
+            lambda *a, **k: recorder["calls"].append(a),
+        )
+
+        def handler(req: httpx.Request):
+            body = json.loads(req.content.decode())
+            assert body["cookies"] == SESSION_LINES
+            success = _browser_success(_target_of(req))
+            # Genuine saved-session capture, but node reports no refreshed
+            # cookies: must NOT overwrite the jar with nothing new.
+            success["updated_cookies"] = []
+            return httpx.Response(200, json=success)
+
+        client = _mock_client(handler)
+        fetch_browser_via_node(
+            "https://www.facebook.com/TestPage",
+            account_name="maverick",
+            owner_id=None,
+            use_cookies=True,
+            client=client,
+        )
+        assert recorder["calls"] == []
+
+    def test_persist_skipped_on_login_wall(self, monkeypatch):
+        monkeypatch.setattr(
+            "backend.scraper.browser_scraper.load_cookies",
+            lambda *a, **k: list(SESSION_JAR),
+        )
+        recorder = {"calls": []}
+        monkeypatch.setattr(
+            "backend.services.node_browser._persist_refreshed_cookies",
+            lambda *a, **k: recorder["calls"].append(a),
+        )
+
+        def handler(req: httpx.Request):
+            body = json.loads(req.content.decode())
+            assert body["cookies"] == SESSION_LINES
+            success = _browser_success(_target_of(req))
+            # Same capture as a positive refresh, but the wall stopped us:
+            # never clobber a saved jar with an anonymous capture's state.
+            success["browser_stats"] = {
+                **success["browser_stats"],
+                "login_wall": True,
+            }
+            return httpx.Response(200, json=success)
+
+        client = _mock_client(handler)
+        _html, stats = fetch_browser_via_node(
+            "https://www.facebook.com/TestPage",
+            account_name="maverick",
+            owner_id=None,
+            use_cookies=True,
+            client=client,
+        )
+        assert stats["login_wall"] is True
+        assert recorder["calls"] == []
+
+    def test_persist_called_after_wall_free_refresh(self, monkeypatch):
+        monkeypatch.setattr(
+            "backend.scraper.browser_scraper.load_cookies",
+            lambda *a, **k: list(SESSION_JAR),
+        )
+        recorder = {"calls": []}
+        monkeypatch.setattr(
+            "backend.services.node_browser._persist_refreshed_cookies",
+            lambda *a, **k: recorder["calls"].append(a),
+        )
+
+        def handler(req: httpx.Request):
+            body = json.loads(req.content.decode())
+            assert body["cookies"] == SESSION_LINES
+            return httpx.Response(200, json=_browser_success(_target_of(req)))
+
+        client = _mock_client(handler)
+        fetch_browser_via_node(
+            "https://www.facebook.com/TestPage",
+            account_name="maverick",
+            owner_id=None,
+            use_cookies=True,
+            client=client,
+        )
+        assert len(recorder["calls"]) == 1
+        updated, account_name, owner_id = recorder["calls"][0]
+        # The refreshed cookie lines match the golden fixture's updated_cookies
+        # exactly — the RFC 6265 wire lines the node response carried.
+        assert updated == list(BROWSER_RESPONSE["updated_cookies"])
+        assert account_name == "maverick"
+        assert owner_id is None
 
 
 # ---------------------------------------------------------------------------

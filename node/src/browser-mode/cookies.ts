@@ -92,3 +92,41 @@ export function parseCookieLines(lines: string[] | null | undefined): BrowserCoo
   }
   return cookies;
 }
+
+/**
+ * Serialize one Playwright-style cookie into the exact RFC 6265 line format
+ * FastAPI's `serialize_cookies` produces (mirror of
+ * backend/services/node_browser.py::serialize_cookies, golden fixture
+ * `fetch_request.browser.json`): `"name=value; Domain=..; Path=..;
+ * [Expires=<epoch>] [Secure] [HttpOnly]"`.  Session cookies (expires -1/0 or
+ * undefined) omit the `Expires=` attribute; flags appear only when set.
+ * Malformed entries (no name/value) are dropped by the caller.
+ */
+export function serializeCookieLine(cookie: BrowserCookie): string {
+  const parts = [`${cookie.name}=${cookie.value}`];
+  if (cookie.domain) parts.push(`Domain=${cookie.domain}`);
+  if (cookie.path) parts.push(`Path=${cookie.path}`);
+  if (typeof cookie.expires === "number" && cookie.expires > 0) {
+    parts.push(`Expires=${Math.trunc(cookie.expires)}`);
+  }
+  if (cookie.secure) parts.push("Secure");
+  if (cookie.httpOnly) parts.push("HttpOnly");
+  return parts.join("; ");
+}
+
+/**
+ * Serialize a whole context cookie dump (Slice C refresh): the reverse of
+ * `parseCookieLines`, used in playwright.ts to hand the post-capture session
+ * back to FastAPI on `FetchResponse.updated_cookies`.  Node never persists
+ * them — FastAPI owns the store (§2/§7).
+ */
+export function serializeCookies(cookies: BrowserCookie[]): string[] {
+  const lines: string[] = [];
+  for (const cookie of cookies) {
+    if (!cookie.name || cookie.value === undefined || cookie.value === null) {
+      continue;
+    }
+    lines.push(serializeCookieLine(cookie));
+  }
+  return lines;
+}

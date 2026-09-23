@@ -172,6 +172,31 @@ describe("POST /fetch", () => {
     await app.close();
   });
 
+  it("browser mode threads a dumpCookies result onto updated_cookies (Slice C refresh)", async () => {
+    // golden ``updated_cookies: []`` when the session has no dump and nodes
+    // that implement it (Slice C refresh) thread them through.  This test
+    // proves the positive path: whatever ``session.dumpCookies()`` emits rides
+    // onto ``FetchResponse.updated_cookies`` verbatim — FastAPI then persists
+    // them (slice C write-back; hermetic, node never persists).
+    const session = {
+      dumpCookies: vi.fn(async () => [
+        "xs=newtoken456def; Domain=.facebook.com; Path=/; Secure; HttpOnly",
+      ]),
+    };
+    const browserOpen = fakeBrowser(session);
+    const { app } = await withApp({ browserOpen });
+    const res = await app.inject({
+      method: "POST",
+      url: "/fetch",
+      payload: { target_url: FB_URL, mode: "browser" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().updated_cookies).toEqual([
+      "xs=newtoken456def; Domain=.facebook.com; Path=/; Secure; HttpOnly",
+    ]);
+    await app.close();
+  });
+
   it("browser mode forwards session cookies to browserOpen (Slice C)", async () => {
     const browserOpen = fakeBrowser();
     const { app } = await withApp({ browserOpen });

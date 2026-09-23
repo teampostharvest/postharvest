@@ -18,8 +18,9 @@ Cookie boundary (finalplanv2 §2/§7): DB access stays Python-only.  The bridge
 loads the jar with ``load_cookies`` (the same function ``fetch_with_browser``
 uses) and serializes it to RFC 6265 ``"name=value; ..."`` lines that ride on
 ``FetchRequest.cookies``; node applies them to the browser context and never
-persists them (refresh write-back arrives in the Slice C ``updated_cookies``
-work).
+persists them — it only reports the post-capture session back on
+``FetchResponse.updated_cookies``, which this bridge persists (Slice C
+refresh, see :func:`fetch_browser_via_node`).
 
 Tuple contract: :func:`fetch_browser_via_node` returns ``(html, stats)`` with
 exactly the same shape as :func:`fetch_with_browser` — ``stats`` carries
@@ -40,12 +41,15 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 
 from backend.core.config import get_settings
+from backend.core.logging import get_logger
 from backend.scraper.errors import (
     ExtractionFailure,
     InvalidUrl,
     OperationCancelled,
     Timeout,
 )
+
+logger = get_logger("services.node_browser")
 
 __all__ = [
     "NodeBrowserClient",
@@ -127,6 +131,108 @@ def _compose_account_id(account_name: Optional[str], owner_id: Optional[int]) ->
     return f"{scope}:{account_name}"
 
 
+def deserialize_cookies(lines: List[str]) -> List[dict]:
+    """Deserialize RFC 6265 cookie lines back into the internal jar shape.
+
+    The exact inverse of :func:`serialize_cookies` — node dumps the post-
+    capture browser context on ``FetchResponse.updated_cookies`` (Slice C
+    refresh) and this turns those lines back into the Playwright-style dicts
+    ``save_cookies`` expects::
+
+        {"name": "xs", "value": "...", "domain": ".facebook.com",
+         "path": "/", "expires": -1, "httpOnly": True, "secure": True}
+
+    ``Expires=`` present -> epoch int; absent (a session cookie) -> ``-1``
+    (the internal sentinel ``serialize_cookies`` omits).  ``Secure`` /
+    ``HttpOnly`` flags become booleans.  Malformed lines and entries without
+    a ``name=value`` pair are dropped.
+    """
+    jar: List[dict] = []
+    for line in lines:
+        parts = line.split(";")
+        nv = parts[0].strip()
+        eq = nv.find("=")
+        if eq <= 0:
+            continue
+        name = nv[:eq].strip()
+        value = nv[eq + 1 :].strip()
+        if not name:
+            continue
+        cookie: dict = {
+            "name": name,
+            "value": value,
+            "domain": "",
+            "path": "/",
+            "expires": -1,
+            "httpOnly": False,
+            "secure": False,
+        }
+        for raw in parts[1:]:
+            attr = raw.strip()
+            if not attr:
+                continue
+            aeq = attr.find("=")
+            key = (attr if aeq == -1 else attr[:aeq]).strip().lower()
+            val = None if aeq == -1 else attr[aeq + 1 :].strip()
+            if key == "domain" and val:
+                cookie["domain"] = val
+            elif key == "path" and val:
+                cookie["path"] = val
+            elif key == "expires":
+                try:
+                    ts = int(float(val))
+                except (TypeError, ValueError):
+                    continue
+                if ts > 0:
+                    cookie["expires"] = ts
+            elif key == "secure":
+                cookie["secure"] = True
+            elif key == "httponly":
+                cookie["httpOnly"] = True
+        if not cookie["domain"] or not cookie["name"]:
+            continue
+        jar.append(cookie)
+    return jar
+
+
+def _persist_refreshed_cookies(
+    lines: List[str],
+    account_name: Optional[str],
+    owner_id: Optional[int],
+) -> None:
+    """Persist node's post-capture session back into the saved cookie store.
+
+    Slice C refresh (finalplanv2 §12): the browser the capture ran in ends
+    with a fresher session than the jar we started from (Facebook rotates
+    cookies across a live session).  ``lines`` are the RFC 6265
+    ``updated_cookies`` node dumped from that context; they are deserialized
+    to the internal jar shape and saved to the same scope (``account_name`` /
+    ``owner_id``) the attempt loaded from, so the next job starts from the
+    refreshed session instead of the stale one.
+
+    DB access stays Python-only (finalplanv2 §2/§7); node never persists.  A
+    refresh failure must never fail the scrape — the capture already
+    succeeded, and a stale jar is recoverable — so ``save_cookies`` errors are
+    logged and swallowed here.
+    """
+    from backend.scraper.browser_scraper import save_cookies
+
+    jar = deserialize_cookies(lines)
+    if not jar:
+        return
+    try:
+        save_cookies(jar, account_name, owner_id)
+        logger.info(
+            "Refreshed saved session cookies for account=%r owner_id=%s "
+            "(%d cookies)",
+            account_name,
+            owner_id,
+            len(jar),
+        )
+    except Exception as exc:  # pragma: no cover - best-effort refresh
+        logger.warning("Failed to persist refreshed cookies: %s", exc)
+
+
 class NodeBrowserClient:
     """Small HTTP client for node ``POST /fetch`` ``mode="browser"``.
 
@@ -164,13 +270,18 @@ class NodeBrowserClient:
     # -- low-level POST -----------------------------------------------------
     def capture(self, url: str, *, account_id: str = "", scroll_rounds: int = 0,
                 max_posts: int = 0, cookies: Optional[List[str]] = None,
-                progress_callback=None) -> Tuple[str, Dict[str, object]]:
+                progress_callback=None) -> Tuple[str, Dict[str, object], List[str]]:
         """POST one browser capture to node and map it into ``(html, stats)``.
 
         ``stats`` mirrors ``fetch_with_browser``'s return contract:
         ``login_wall`` (bool) and ``posts_found`` (int).  The broker also
         carries ``feed_missing`` through for diagnostics, exactly matching
         ``FetchResponse.browser_stats``.
+
+        Also returns the RFC 6265 ``updated_cookies`` lines node dumped from
+        the browser context after capture (Slice C refresh) as a third
+        element — the caller decides whether to persist them; this client
+        never writes anything.
 
         Raises the same ``ScraperError`` subtypes the Python browser path
         raises for the equivalent condition: ``browser_launch_failed`` /
@@ -209,7 +320,7 @@ class NodeBrowserClient:
 
     def _decode_success(
         self, url: str, response: httpx.Response, progress_callback=None
-    ) -> Tuple[str, Dict[str, object]]:
+    ) -> Tuple[str, Dict[str, object], List[str]]:
         try:
             data = response.json()
             status = int(data["status_code"])
@@ -220,6 +331,11 @@ class NodeBrowserClient:
                 "feed_missing": bool(bstats.get("feed_missing", False)),
                 "posts_found": int(bstats.get("posts_found", 0)),
             }
+            updated = data.get("updated_cookies") or []
+            if not isinstance(updated, list):
+                updated = []
+            # Malformed entries (non-str) must not poison the refresh path.
+            refreshed = [str(line) for line in updated if isinstance(line, str)]
             html = _decode_payload(raw)
         except (ValueError, KeyError, TypeError, UnicodeDecodeError) as exc:
             raise ExtractionFailure(
@@ -240,7 +356,7 @@ class NodeBrowserClient:
                 progress_callback(posts_found=stats["posts_found"])
             except Exception:  # pragma: no cover - callback must never kill
                 pass
-        return html, stats
+        return html, stats, refreshed
 
     def _post(self, url: str, body: dict) -> httpx.Response:
         """POST ``/fetch`` with limited retry+backoff on *fast* transport
@@ -304,6 +420,15 @@ def fetch_browser_via_node(
     ride on ``FetchRequest.cookies`` — DB access never crosses to node
     (finalplanv2 §2/§7).  ``client`` ownership: the caller owns any injected
     client; the client built here is closed before returning/raising.
+
+    Slice C refresh: when this attempt actually used a saved session
+    (``use_cookies`` and a non-empty jar was sent) and the capture did not end
+    on a login wall, the ``updated_cookies`` lines node dumped from the
+    post-capture browser context are persisted back to the same scope via
+    :func:`save_cookies` — self-healing the saved session so the next
+    job/attempt starts from fresher cookies.  Anonymous attempts (no jar) and
+    wall captures never persist: node does not own the store, and we must not
+    clobber a good jar with an expired/captcha cookie set.
     """
     from backend.scraper.browser_scraper import load_cookies
 
@@ -321,7 +446,7 @@ def fetch_browser_via_node(
     owns_client = client is None
     client = client or NodeBrowserClient(get_settings().node_base_url)
     try:
-        return client.capture(
+        html, stats, updated = client.capture(
             url,
             account_id=account_id,
             scroll_rounds=scroll_rounds or 0,
@@ -332,6 +457,13 @@ def fetch_browser_via_node(
     finally:
         if owns_client:
             client.close()
+
+    # Self-heal only for a genuine saved-session attempt that got past the
+    # wall.  `cookies` non-empty proves a jar was actually sent (never a
+    # clobber of the saved session by an anonymous run).
+    if use_cookies and cookies and updated and not stats.get("login_wall"):
+        _persist_refreshed_cookies(updated, account_name, owner_id)
+    return html, stats
 
 
 def _decode_payload(raw: str) -> str:

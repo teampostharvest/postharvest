@@ -41,6 +41,13 @@ export interface CaptureRoute {
 export interface CaptureSession {
   newPage(): Promise<CapturePage>;
   close(): Promise<void>;
+  /**
+   * RFC 6265 cookie lines present in the browser context *after* capture
+   * (Slice C refresh).  FastAPI persists these back into the saved session
+   * store; node never persists them (§2/§7).  Optional so hermetic fakes
+   * can omit it — the route then reports `updated_cookies: []`.
+   */
+  dumpCookies?(): Promise<string[]>;
 }
 
 export interface BrowserOpenOptions {

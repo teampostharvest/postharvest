@@ -148,13 +148,25 @@ async function handleBrowser(
       shouldAbort: () => false,
     });
 
+    // Slice C refresh: give FastAPI the session the browser ended with so it
+    // can persist it (self-healing saved sessions). Best-effort — a cookie
+    // dump failure must never mask a capture that already succeeded.
+    let updatedCookies: string[] = [];
+    if (typeof session.dumpCookies === "function") {
+      try {
+        updatedCookies = await session.dumpCookies();
+      } catch {
+        updatedCookies = [];
+      }
+    }
+
     const response: FetchResponse = {
       status_code: 200,
       final_url: captured.finalUrl,
       content_type: "text/html",
       raw_payload: Buffer.from(captured.html, "utf8").toString("base64"),
       fetched_at_ms: Date.now(),
-      updated_cookies: [],
+      updated_cookies: updatedCookies,
       browser_stats: {
         login_wall: captured.stats.loginWall,
         feed_missing: captured.stats.feedMissing,
