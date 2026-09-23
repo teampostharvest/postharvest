@@ -33,8 +33,10 @@ type ParsedPost struct {
 	PostURL        *string
 	Text           *string
 	PublishedAt    *time.Time
+	PublishedAtRaw *string
 	Likes          *int64
 	Reactions      *int64
+	LikesTotal     *int64
 	CommentsCount  *int64
 	Shares         *int64
 	ViewsCount     *int64
@@ -73,11 +75,17 @@ func unifyParsed(p *ParsedPost, d map[string]interface{}) {
 	if v, ok := d["text"]; ok && v != nil {
 		p.Text = ptrStr(v.(string))
 	}
+	if v, ok := d["published_at_raw"]; ok && v != nil {
+		p.PublishedAtRaw = ptrStr(v.(string))
+	}
 	if v, ok := d["likes"]; ok && v != nil {
 		p.Likes = ptrInt(int64(v.(float64)))
 	}
 	if v, ok := d["reactions"]; ok && v != nil {
 		p.Reactions = ptrInt(int64(v.(float64)))
+	}
+	if v, ok := d["likes_total"]; ok && v != nil {
+		p.LikesTotal = ptrInt(int64(v.(float64)))
 	}
 	if v, ok := d["comments_count"]; ok && v != nil {
 		p.CommentsCount = ptrInt(int64(v.(float64)))
