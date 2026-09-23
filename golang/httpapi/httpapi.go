@@ -3,10 +3,11 @@
 //
 // It is deliberately a thin adapter: request validation, base64 decode,
 // content-type dispatch to the hermetic parser (golang/parser, M2), the
-// normalize+dedup slice-A pipeline (golang/worker), and Python-format JSON
-// response bytes.  All interesting bytes live in those two packages; this
-// one only wires them to HTTP and proves the wire shape against real-Python
-// goldens (testdata/gen_goldens.py + *_test.go).
+// normalize+dedup slice-A pipeline (golang/worker), the §8(c) idempotency
+// guard (golang/idempotency, M4), and Python-format JSON response bytes.
+// All interesting bytes live in those packages; this one only wires them to
+// HTTP and proves the wire shape against real-Python goldens
+// (testdata/gen_goldens.py + *_test.go).
 //
 // Phase 1 transport is plain HTTP + JSON (finalplanv2.md §6); the Parse RPC
 // hangs off POST /v1/parse with the contract.ParseRequest/ParseResponse
@@ -26,6 +27,7 @@ import (
 
 	worker "postharvest/golang"
 	"postharvest/golang/contract"
+	"postharvest/golang/idempotency"
 	"postharvest/golang/parser"
 )
 
@@ -36,6 +38,12 @@ const maxRequestBody = 64 << 20 // 64 MiB
 
 // parsePath is the Phase-1 Parse RPC route (finalplanv2.md §6).
 const parsePath = "/v1/parse"
+
+// cacheHitHeader is a non-contract observability header telling callers
+// whether a ParseResponse came from the §8(c) idempotency cache ("hit") or
+// fresh work ("miss").  It exists so retry diagnostics (and M7 client tests)
+// can see the cache working without parsing the body.
+const cacheHitHeader = "X-PostHarvest-Cache"
 
 // Clock is an injectable wall clock so golden tests are deterministic
 // (mirrors parser.py's `now` parameter).  nil means time.Now.
@@ -48,23 +56,42 @@ type Outcome struct {
 	Errors []string
 }
 
-// Process runs the Parse pipeline for one request.  An error is returned
-// only for request-level problems (unknown content_type, undecodable
-// base64); per-post parse failures are isolated into Outcome.Errors
-// (finalplanv2.md §6 fault isolation), exactly like ParseResponse.errors.
-func Process(req contract.ParseRequest, now time.Time) (Outcome, error) {
+// DecodeRequest validates the request-level fields (content_type whitelist,
+// raw_payload base64) and returns the decoded payload.  Errors here are
+// request-level 400s; per-post parse failures are never this function's.
+// The handler uses it both as the validation gate before the idempotency
+// lookup and as the payload source, so a large payload is decoded exactly
+// once.
+func DecodeRequest(req contract.ParseRequest) ([]byte, error) {
 	switch req.ContentType {
 	case "html", "graphql_json":
 	default:
-		return Outcome{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"unsupported content_type %q (want \"html\" or \"graphql_json\")",
 			req.ContentType)
 	}
 	payload, err := base64.StdEncoding.DecodeString(req.RawPayload)
 	if err != nil {
-		return Outcome{}, fmt.Errorf("raw_payload is not valid base64: %v", err)
+		return nil, fmt.Errorf("raw_payload is not valid base64: %v", err)
 	}
+	return payload, nil
+}
 
+// Process runs the Parse pipeline for one request.  It validates
+// (DecodeRequest) and returns an error only for request-level problems
+// (unknown content_type, undecodable base64); per-post parse failures are
+// isolated into Outcome.Errors (finalplanv2.md §6 fault isolation), exactly
+// like ParseResponse.errors.
+func Process(req contract.ParseRequest, now time.Time) (Outcome, error) {
+	payload, err := DecodeRequest(req)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return processPayload(req, payload, now)
+}
+
+// processPayload runs the pipeline on an already-decoded, validated request.
+func processPayload(req contract.ParseRequest, payload []byte, now time.Time) (Outcome, error) {
 	var parsed []*worker.ParsedPost
 	var errors []string
 	var pageName, pageID *string
@@ -91,18 +118,23 @@ func Process(req contract.ParseRequest, now time.Time) (Outcome, error) {
 	return Outcome{Posts: res.Posts, Errors: errors}, nil
 }
 
-// server carries the injectable clock for the HTTP handler.
+// server carries the injectable clock and the §8(c) idempotency store for
+// the HTTP handler.
 type server struct {
-	now Clock
+	now  Clock
+	idem idempotency.Store
 }
 
 // NewHandler returns the Phase-1 HTTP surface: POST /v1/parse plus the
-// /healthz and /readyz probes (delegating to golang/health.go).
-func NewHandler(clock Clock) http.Handler {
+// /healthz and /readyz probes (delegating to golang/health.go).  Passing a
+// nil store disables the §8(c) idempotency cache (single-shot/hermetic
+// mode); with a store, requests carrying a non-empty idempotency_key get
+// retry-safe cached responses per finalplanv2.md §8(c).
+func NewHandler(clock Clock, store idempotency.Store) http.Handler {
 	if clock == nil {
 		clock = time.Now
 	}
-	s := &server{now: clock}
+	s := &server{now: clock, idem: store}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+parsePath, s.handleParse)
 	// Non-POST methods on the route get a JSON 405 instead of Go's plain
@@ -125,7 +157,27 @@ func (s *server) handleParse(w http.ResponseWriter, r *http.Request) {
 			"invalid ParseRequest JSON: "+err.Error())
 		return
 	}
-	out, err := Process(req, s.now())
+	payload, err := DecodeRequest(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// §8(c): check the idempotency cache before doing real work.  A hit
+	// returns the exact cached ParseResponse bytes — no re-parse.  The
+	// cache is best-effort: a store error is treated as a miss so the
+	// worker keeps parsing when Redis is down (availability over dedup).
+	if s.idem != nil && req.IdempotencyKey != "" {
+		if cached, hit, err := s.idem.Get(r.Context(), req.IdempotencyKey); err == nil && hit {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set(cacheHitHeader, "hit")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(cached)
+			return
+		}
+	}
+
+	out, err := processPayload(req, payload, s.now())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -136,7 +188,15 @@ func (s *server) handleParse(w http.ResponseWriter, r *http.Request) {
 			"failed to serialize response: "+err.Error())
 		return
 	}
+
+	// Cache-write is best-effort too — it never fails or stalls the
+	// response (§8(c): short TTL, not a durability store).
+	if s.idem != nil && req.IdempotencyKey != "" {
+		_ = s.idem.Set(r.Context(), req.IdempotencyKey, body, idempotency.TTL)
+	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set(cacheHitHeader, "miss")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 }

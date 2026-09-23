@@ -6,6 +6,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 
 	worker "postharvest/golang"
 	"postharvest/golang/contract"
+	"postharvest/golang/idempotency"
 )
 
 // goldenNow is the fixed clock injected into the handler; it must match the
@@ -26,7 +28,11 @@ import (
 var goldenNow = time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 
 func newTestHandler() http.Handler {
-	return NewHandler(func() time.Time { return goldenNow })
+	return NewHandler(func() time.Time { return goldenNow }, nil)
+}
+
+func newTestHandlerWithStore(store idempotency.Store) http.Handler {
+	return NewHandler(func() time.Time { return goldenNow }, store)
 }
 
 var (
@@ -316,5 +322,147 @@ func TestHandlerIncludesHealthProbes(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
 			t.Fatalf("%s: status=%d body=%q", path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// recordingStore wraps idempotency.Memory and counts cache operations so the
+// HTTP proofs can distinguish "served from cache" from "re-parsed" without
+// any network.
+type recordingStore struct {
+	*idempotency.Memory
+	gets, sets int
+}
+
+func newRecordingStore(clock func() time.Time) *recordingStore {
+	return &recordingStore{Memory: idempotency.NewMemory(clock)}
+}
+
+func (r *recordingStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	r.gets++
+	return r.Memory.Get(ctx, key)
+}
+
+func (r *recordingStore) Set(ctx context.Context, key string, data []byte, ttl time.Duration) error {
+	r.sets++
+	return r.Memory.Set(ctx, key, data, ttl)
+}
+
+func TestParseIdempotencyReplaysCachedBytes(t *testing.T) {
+	// §8(c): the second request with the same idempotency_key must return
+	// the cached ParseResponse bytes verbatim — no re-parse, no re-set.
+	store := newRecordingStore(nil)
+	h := newTestHandlerWithStore(store)
+	body := marshalReq(t, newFixtureRequest(t)) // idempotency_key "job_7:acmewidgets_1"
+
+	first := postParse(t, h, body)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first: status = %d, body = %s", first.Code, first.Body.String())
+	}
+	if first.Header().Get(cacheHitHeader) != "miss" {
+		t.Fatalf("first X-PostHarvest-Cache = %q, want miss", first.Header().Get(cacheHitHeader))
+	}
+	want := goldenBytes(t, "parse_response_dom_sample.json")
+	if !reflect.DeepEqual(first.Body.Bytes(), want) {
+		t.Fatal("first response must match the Python golden")
+	}
+	if store.gets != 1 || store.sets != 1 {
+		t.Fatalf("first: gets=%d sets=%d, want 1/1", store.gets, store.sets)
+	}
+
+	second := postParse(t, h, body)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second: status = %d, body = %s", second.Code, second.Body.String())
+	}
+	if second.Header().Get(cacheHitHeader) != "hit" {
+		t.Fatalf("second X-PostHarvest-Cache = %q, want hit", second.Header().Get(cacheHitHeader))
+	}
+	if !reflect.DeepEqual(second.Body.Bytes(), first.Body.Bytes()) {
+		t.Fatal("cached replay must be byte-identical to the original response")
+	}
+	// One extra Get, no extra Set: the parser never ran again.
+	if store.gets != 2 || store.sets != 1 {
+		t.Fatalf("second: gets=%d sets=%d, want 2/1", store.gets, store.sets)
+	}
+}
+
+func TestParseIdempotencyExpiresAndRecomputes(t *testing.T) {
+	// After TTL elapses the cache is a miss again and the work is redone
+	// (§8(c): short TTL — this is not a durability store).
+	now := goldenNow
+	clock := func() time.Time { return now }
+	store := newRecordingStore(clock)
+	h := newTestHandlerWithStore(store)
+	body := marshalReq(t, newFixtureRequest(t))
+
+	if rec := postParse(t, h, body); rec.Header().Get(cacheHitHeader) != "miss" {
+		t.Fatalf("first = %q, want miss", rec.Header().Get(cacheHitHeader))
+	}
+	if store.gets != 1 || store.sets != 1 {
+		t.Fatalf("first: gets=%d sets=%d, want 1/1", store.gets, store.sets)
+	}
+
+	now = now.Add(idempotency.TTL + time.Minute) // expire the entry
+	if rec := postParse(t, h, body); rec.Header().Get(cacheHitHeader) != "miss" {
+		t.Fatalf("after TTL = %q, want miss", rec.Header().Get(cacheHitHeader))
+	}
+	if store.gets != 2 || store.sets != 2 {
+		t.Fatalf("after TTL: gets=%d sets=%d, want 2/2 (recomputed)", store.gets, store.sets)
+	}
+}
+
+func TestParseDoesNotTouchCacheWithoutKey(t *testing.T) {
+	store := newRecordingStore(nil)
+	h := newTestHandlerWithStore(store)
+	req := newFixtureRequest(t)
+	req.IdempotencyKey = "" // job without an idempotency key
+	rec := postParse(t, h, marshalReq(t, req))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if store.gets != 0 || store.sets != 0 {
+		t.Fatalf("no idempotency_key: gets=%d sets=%d, want 0/0", store.gets, store.sets)
+	}
+}
+
+func TestParseNilStoreBypassesIdempotency(t *testing.T) {
+	// A nil store (single-shot mode) must behave exactly like M3: parse
+	// every time, never consult a cache.
+	h := newTestHandler()
+	body := marshalReq(t, newFixtureRequest(t))
+	for i := 0; i < 2; i++ {
+		rec := postParse(t, h, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d", i, rec.Code)
+		}
+		if !reflect.DeepEqual(rec.Body.Bytes(), goldenBytes(t, "parse_response_dom_sample.json")) {
+			t.Fatalf("request %d: response must match the Python golden", i)
+		}
+	}
+}
+
+func TestParseInvalidPayloadIsNeverServedFromCache(t *testing.T) {
+	// A request whose base64/content_type is garbage returns 400 even if
+	// the idempotency_key would match a cached entry — only validated
+	// requests are cacheable or cache-served.
+	store := newRecordingStore(nil)
+	h := newTestHandlerWithStore(store)
+	good := marshalReq(t, newFixtureRequest(t))
+	if rec := postParse(t, h, good); rec.Code != http.StatusOK {
+		t.Fatalf("seed request: status = %d", rec.Code)
+	}
+	var bad contract.ParseRequest
+	if err := json.Unmarshal(good, &bad); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	bad.ContentType = "xml" // same key, invalid content type
+	rec := postParse(t, h, marshalReq(t, bad))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid content_type with cached key: status = %d, want 400", rec.Code)
+	}
+	bad2 := newFixtureRequest(t)
+	bad2.RawPayload = "not-base64!!"
+	rec = postParse(t, h, marshalReq(t, bad2))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid base64 with cached key: status = %d, want 400", rec.Code)
 	}
 }
