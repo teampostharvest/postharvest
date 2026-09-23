@@ -11,7 +11,7 @@ uvicorn==0.52.4
 # WebSocket runtime for the session-capture CDP bridge (uvicorn without
 # [standard] bundles no websocket implementation).
 websockets==17.1
-sqlalchemy==2.0.52
+sqlalchemy==2.0.54
 pydantic==2.13.5
 pydantic-settings==2.15.0
 python-multipart==0.0.32
