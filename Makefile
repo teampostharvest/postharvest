@@ -156,7 +156,15 @@ test: ## Backend test suite (pytest, includes CLI + scraper)
 test-frontend: ## Frontend unit tests (vitest)
 	cd frontend && npm run test
 
-test-all: test test-frontend ## Run backend + frontend tests
+test-node: ## Node fetcher tests (vitest)
+	cd node && npm run test
+
+test-go: ## Go worker tests (stdlib only, offline — no go get ever)
+	cd go-worker && gofmt -l . && GOPROXY=off go test -count=1 ./...
+
+test-all: test test-frontend test-node test-go ## Run ALL suites (backend + frontend + node + go)
+
+checks: typecheck lint lint-ff ## Frontend static checks (typecheck + lint)
 
 lint: ## Backend lint (if configured) + frontend eslint
 	cd frontend && npm run lint
@@ -166,6 +174,34 @@ lint-ff: ## Frontend fast lint (oxlint)
 
 typecheck: ## Frontend TypeScript check
 	cd frontend && npx tsc --noEmit
+
+typecheck-node: ## Node service TypeScript check
+	cd node && npm run typecheck
+
+
+# ============================================================================
+# Whole-codebase status (the one command that shows everything)
+# ============================================================================
+
+status: ## Show git state, compose services, and containers at a glance
+	@echo "── git ───────────────────────────────────────────────"
+	@printf 'branch: %s\n' "$$(git branch --show-current)"
+	@echo "worktree:"; git status --short | sed 's/^/  /' || true
+	@echo
+	@echo "── compose services (base) ──────────────────────────"
+	@cd $(PROD_DIR) && $(DOCKER) ps -a --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo "  (no compose containers)"
+	@echo
+	@echo "── compose services (prod profile) ──────────────────"
+	@cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile prod ps -a --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo "  (no prod containers)"
+	@echo
+	@echo "── project containers (any compose project) ─────────"
+	@docker ps -a --filter name=postharvest --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+
+ps: ## Alias: compose ps (base)
+	cd $(PROD_DIR) && $(DOCKER) ps
+
+redis-cli: ## Open a redis-cli shell in the compose-managed redis
+	docker exec -it postharvest-redis redis-cli
 
 
 # ============================================================================

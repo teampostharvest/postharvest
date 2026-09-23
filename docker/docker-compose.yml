@@ -6,19 +6,22 @@
 #     docker compose up --build
 #     -> backend  http://localhost:8000  (uvicorn --reload)
 #        frontend http://localhost:3000  (next dev, hot reload)
-#        postgres internal (no nginx)
+#        redis    internal (shared rate-limit store)
+#        node     internal (facebook-facing fetch service)
 #
 #   PRODUCTION (this file, nginx via --profile prod; override ignored):
-#     docker compose -f docker-compose.yml --profile prod up -d --build
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#         --profile prod up -d --build
 #     -> nginx     :80/:443
 #          /api/*  -> backend  (:8000 FastAPI)
 #          /       -> frontend (:3000 Next.js standalone)
-#        postgres  internal, isolated network
+#        redis, node   internal, isolated network
 #
 # Service wiring:
-#   web       network: nginx, frontend, backend   (browser-facing path)
-#   isolated  network: backend, postgres          (internal: no route out)
+#   web       network: nginx, frontend, backend, node   (browser-facing path)
+#   isolated  network: backend, node, redis             (internal: no route out)
 #
+# The database is managed Supabase (SUPABASE_DB_URL), NOT a compose service.
 # Playwright/Chromium is baked into the backend image; job state is in-process
 # worker threads, so the backend MUST stay a single replica.
 name: postharvest
@@ -226,18 +229,46 @@ services:
       SCRAPER_TIMEOUT_SECONDS: ${SCRAPER_TIMEOUT_SECONDS:-20}
       SCRAPER_MAX_RETRIES: ${SCRAPER_MAX_RETRIES:-3}
       SCRAPER_ROBOTS: ${SCRAPER_ROBOTS:-1}
-    # Intentionally NO depends_on redis: this branch's compose predates the
-    # redis/worker services (PR #54 adds them to this file). The fetcher
-    # tolerates a missing Redis, so merge order between the two PRs is free.
+    # Only service_started (not healthy): the fetcher must never hard-block on
+    # Redis — it degrades to in-process buckets and /readyz reports the gap.
+    depends_on:
+      redis:
+        condition: service_started
     restart: unless-stopped
     stop_grace_period: 10s
     networks:
       - web
       - isolated
 
+  # =====================================================================
+  # redis — shared rate-limit store (finalplanv2 §8)
+  # Internal only: no published ports, `isolated` network (no route out).
+  # node (and future backend seams) reach it as `redis:6379`. Named volume
+  # keeps bucket state across restarts.
+  # =====================================================================
+  redis:
+    image: redis:7.4-alpine
+    container_name: postharvest-redis
+    init: true
+    restart: unless-stopped
+    # RDB snapshots + AOF are off (rate-limit/cache keys are loss-tolerant);
+    # the volume exists so a container restart does not cold-restart buckets.
+    command: ["redis-server", "--save", '""', "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - isolated
+
 volumes:
   certbot-www:
   certbot-conf:
+  redis-data:
 
 networks:
   web:

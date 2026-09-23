@@ -60,6 +60,13 @@ services:
     mem_limit: ${NODE_MEM_LIMIT:-256m}
     cpus: ${NODE_CPUS:-0.5}
 
+  redis:
+    # Rate-limit buckets are loss-tolerant and tiny; cap so a burst can't
+    # starve the box. No read_only/cap_drop here: redis writes its own /data
+    # volume and the hardening pattern is for OUR app processes, not stores.
+    mem_limit: ${REDIS_MEM_LIMIT:-128m}
+    cpus: ${REDIS_CPUS:-0.5}
+
   nginx:
     read_only: true
     tmpfs:

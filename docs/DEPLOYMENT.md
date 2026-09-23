@@ -49,8 +49,16 @@ make prod-health    # curl http://localhost/api/health
 
 Prod = `docker-compose.yml` + `docker-compose.prod.yml` `--profile prod`.
 The explicit `-f` disables the dev override automatically. Only nginx exposes
-ports (`:80/:443`); backend/frontend/postgres are internal to the Docker
+ports (`:80/:443`); backend/frontend/redis/node are internal to the Docker
 networks.
+
+### Whole-codebase status
+
+```bash
+make status     # one command: git branch/worktree + compose services + containers
+make ps         # compose ps (base stack)
+make redis-cli  # redis-cli shell inside the compose-managed redis
+```
 
 ### Host tools
 
@@ -59,10 +67,12 @@ make backend-dev        # uvicorn --reload on :8000 (host, no Docker)
 make backend-start
 make frontend-dev       # next dev on :3000 (host)
 make frontend-build / frontend-start
-make test               # pytest (133 tests)
-make test-frontend      # vitest
-make test-all
-make lint / lint-ff / typecheck
+make test               # pytest (backend + CLI + scraper)
+make test-frontend      # frontend vitest
+make test-node          # node fetcher vitest
+make test-go            # go-worker gofmt + go test (offline)
+make test-all           # all four suites
+make checks             # typecheck + lint
 make cli-login ACCOUNT=myfb   # Python CLI Facebook login
 make cli-scrape URL=... --browser MAXX=20 EXPORT=xlsx OUT=posts.xlsx
 ```
@@ -73,13 +83,17 @@ make cli-scrape URL=... --browser MAXX=20 EXPORT=xlsx OUT=posts.xlsx
 Internet
   │  :80 / :443
   ▼
-nginx              network: web (nginx + frontend + backend)
+nginx              network: web (nginx + frontend + backend + node)
   ├── /api/*   → backend    (:8000, FastAPI)
   ├── /        → frontend   (:3000, Next.js standalone)
   └── /docs    → backend Swagger
-backend            network: isolated (backend + postgres) — no external route
-postgres:16-alpine (named volume pgdata, healthchecked, no host port)
+backend            network: web + isolated
+node               network: web + isolated   (facebook fetcher, :9334 internal)
+redis              network: isolated         (shared rate-limit store, :6379 internal)
 ```
+
+The database is **managed Supabase** (`SUPABASE_DB_URL`) — there is no
+Postgres compose service anymore.
 
 `docker/Dockerfile` is multi-target:
 `frontend-build` → `frontend` / `frontend-dev`, and `backend` → `backend-dev`.
@@ -96,7 +110,8 @@ Key compose-level vars (all have defaults baked into the compose files):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `POSTGRES_USER/PASSWORD/DB` | postharvest/change-me/postharvest | DB credentials (set both the postgres image and the backend DSN) |
+| `SUPABASE_DB_URL` | *(empty)* | managed Postgres DSN (no compose postgres service) |
+| `REDIS_URL` | `redis://redis:6379/0` | shared rate-limit store (compose service name) |
 | `COOKIE_ENCRYPTION_KEY` | *(empty)* | Fernet key for encrypting user FB cookies at rest (future) |
 | `WORKER_THREADS` | 4 | background scrape workers |
 | `MAX_URLS_PER_JOB` | 300 | URL limit per scrape request (global cap above plan ceilings) |
