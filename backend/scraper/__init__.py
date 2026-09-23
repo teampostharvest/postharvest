@@ -62,6 +62,26 @@ from .url_validator import validate_or_raise
 _SCRAPE_TTL_CONSULT = None  # armed to a ``TTLCache`` by the hermetic suite
 
 
+def arm_scrape_ttl_cache(ttl_seconds: float) -> None:
+    """Production arming of the hermetic consult seam (finalplanv2 §8).
+
+    Hermetic default stays DISARMED (``_SCRAPE_TTL_CONSULT is None``);
+    the host FastAPI app arms it at startup when ``SCRAPE_TTL_SECONDS>0``
+    (see backend.main:lifespan).  The hermetic C-paper arms via
+    ``monkeypatch`` exactly as before — never via this env-driven path —
+    so every suite keeps its bytes (add-don't-replace).
+    """
+    global _SCRAPE_TTL_CONSULT
+    if ttl_seconds and ttl_seconds > 0:
+        from backend.core.cache import TTLCache
+
+        cache = TTLCache(ttl_seconds=float(ttl_seconds))
+        cache.arm(True)
+        _SCRAPE_TTL_CONSULT = cache
+    else:
+        _SCRAPE_TTL_CONSULT = None
+
+
 def _ttl_consult(normalized_url: str):
     """Serve the node leg's payload from the TTL window if armed+fresh.
 

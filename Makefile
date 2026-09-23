@@ -60,7 +60,7 @@ dev-ps: ## List dev stack containers
 # Docker — production stack (nginx :80/:443 + hardened prod layer)
 # ============================================================================
 
-prod-up: ## Start the production stack (nginx, frontend, backend, postgres)
+prod-up: ## Start the production stack (nginx, frontend, backend, node, redis)
 	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile prod up -d
 
 prod-build: ## Rebuild prod images and start

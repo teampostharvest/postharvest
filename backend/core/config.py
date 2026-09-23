@@ -143,6 +143,13 @@ class Settings(BaseSettings):
     # network (see docker/docker-compose.yml backend environment).
     node_base_url: str = "http://127.0.0.1:9334"
 
+    # --- runtime cache (finalplanv2 §8 "snappy" cache, slice C) -----------
+    # In-process TTL window in front of the node-fetch seam
+    # (backend.scraper._SCRAPE_TTL_CONSULT). 0 (default) keeps the consult
+    # DISARMED — byte-identical to the hermetic default the suite asserts.
+    # >0 arms the cache for that many seconds per normalized URL in prod.
+    scrape_ttl_seconds: float = 0.0
+
     # --- proxy support (optional) -----------------------------------------------
     proxy_enabled: bool = False
     proxy_url: str | None = None

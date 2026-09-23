@@ -46,6 +46,16 @@ async def lifespan(_app: FastAPI):
     setup_logging(logging.DEBUG if settings.debug else logging.INFO)
     settings.ensure_dirs()
     init_db()
+    # Production runtime cache (finalplanv2 §8, slice C): arm the node-fetch
+    # consult seam when SCRAPE_TTL_SECONDS>0. Default stays DISARMED so the
+    # hermetic suites (which arm via monkeypatch) keep their bytes — this
+    # env-driven path only exists for the composed prod/dev stacks.
+    from backend.scraper import arm_scrape_ttl_cache
+
+    arm_scrape_ttl_cache(settings.scrape_ttl_seconds)
+    if settings.scrape_ttl_seconds > 0:
+        logger.info("Runtime TTL cache armed (%.1fs per normalized URL)",
+                    settings.scrape_ttl_seconds)
     # Reconcile persisted job rows with the (empty) fresh worker pool:
     # orphaned `running` jobs fail with an audit row, `queued` jobs resume.
     # Best-effort — the sweep never raises, so boot cannot block on it.

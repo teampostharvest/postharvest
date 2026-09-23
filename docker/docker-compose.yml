@@ -122,6 +122,10 @@ services:
       # browser_scraper (independent of USE_NODE).
       USE_NODE_BROWSER: ${USE_NODE_BROWSER:-0}
       NODE_BASE_URL: ${NODE_BASE_URL:-http://node:9334}
+      # Runtime TTL cache (finalplanv2 §8, slice C): >0 arms the backend's
+      # in-process node-fetch consult seam for that many seconds per URL.
+      # 0 (default) keeps it DISARMED — prod parity with the hermetic suites.
+      SCRAPE_TTL_SECONDS: ${SCRAPE_TTL_SECONDS:-0}
       COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-}
       # Comma-separated emails auto-promoted to the ops role on first login.
       OPS_EMAILS: ${OPS_EMAILS:-}
