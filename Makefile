@@ -159,8 +159,8 @@ test-frontend: ## Frontend unit tests (vitest)
 test-node: ## Node fetcher tests (vitest)
 	cd node && npm run test
 
-test-go: ## Go worker tests (stdlib only, offline — no go get ever)
-	cd golang && gofmt -l . && GOPROXY=off go test -count=1 ./...
+test-go: ## Go worker tests (offline, vendored deps — no go get ever)
+	cd golang && test -z "$$(gofmt -l . | grep -v '^vendor/')" && GOPROXY=off go test -count=1 ./...
 
 test-all: test test-frontend test-node test-go ## Run ALL suites (backend + frontend + node + go)
 
