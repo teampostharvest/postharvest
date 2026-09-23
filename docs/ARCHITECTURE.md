@@ -22,6 +22,8 @@ run_scrape_job(job_id)  ── per-source state machine ──►  CrawlState ch
    ▼
 scrape_source(url, options, progress_cb, cancel)       (backend/scraper/)
    ▼
+fetch ──► [offload seams: USE_NODE fetch, USE_GO_WORKER compute]
+   ▼
 Parse → normalize → dedup → cap  ──►  Post rows + EngagementMetric + Media
    │
    ▼
@@ -146,6 +148,46 @@ Public contract (`backend/scraper/__init__.py`): `validate_facebook_url(url)` +
 - **`errors.py`** — `ScraperError` taxonomy: `InvalidUrl`, `UnsupportedUrl`,
   `PageUnavailable`, `AuthRequired`, `RateLimited`, `Timeout`,
   `ExtractionFailure`, `OperationCancelled`.
+
+## Compute offload seams (node fetch / go compute)
+
+The in-process Python pipeline above remains the **source of truth** and the
+**default** — the "flag-off" path is byte-untouched by the offload work.
+Two opt-in seams (both `false` by default, `backend/core/config.py`)
+delegate slices of an HTTP-mode scrape to sibling services, behind the same
+flag discipline as any other risky cutover:
+
+| Flag | Default | Delegates | Sibling service |
+|---|---|---|---|
+| `USE_NODE` | `0` | the **fetch** slice (robots/throttle/retry) | `node/` — Fastify + undici + Playwright, `http://node:9334` |
+| `USE_GO_WORKER` | `0` | the **compute** slice (parse → normalize → dedup) | `golang/` — Go, `POST /v1/parse`, `http://go:8080` |
+
+Both seams keep **fault isolation**: a sibling outage (or timeout) is a
+per-source error recorded on that source (`network_error`), never a job
+crash — the Google-town error taxonomy (`ScraperError`) is mapped 1:1 by
+each client (`backend/services/node_fetch.py`, `backend/services/go_worker.py`).
+
+**Contract boundary.** The Go worker's wire contract lives in
+`shared/proto/postharvest.proto` (ParseRequest/ParseResponse) with
+`shared/fixtures/` as the byte fixtures, and the Go side is byte-proven
+against the *real* Python pipeline: `gen_goldens.py` scripts run
+`parse_page → normalize_post → dedup_posts → json.dumps` to produce the
+exact golden `ParseResponse` bytes the Go handler must reproduce (and its
+hermetic `httptest` proofs do). Editing order is contract → types → Go →
+fixtures; the Go worker (`golang/`, M1–M6) is stateless compute — no
+Facebook calls, no DB — with its own `idempotency/` Store seam for the
+§8(c) retry cache (`idemp:` keyspace; in-memory for hermetic proofs,
+Redis-backed via the vendored `go-redis` at deployment).
+
+**Deployables** (M6) exist in code with **zero live exposure**: the §15
+gate still holds for anything operational. `golang/cmd/server` is the one
+binary (env: `PORT`, optional `REDIS_URL` for the idempotency cache),
+`golang/Dockerfile` builds it statically (offline, `-mod=vendor`), and the
+compose stack adds an internal `go:` service on the `isolated` network
+(`http://go:8080`). The M7 flagged client (`backend/services/go_worker.py`)
+plus its parity suite (`tests/test_go_worker_seam.py`) prove the flagged
+path returns byte-identical posts/stats to the flag-off path before anyone
+flips the switch.
 
 ## Exports
 

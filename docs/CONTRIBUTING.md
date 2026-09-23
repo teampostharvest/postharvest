@@ -32,6 +32,8 @@ Secrets/env: `cp .env.example .env` for CLI/tests only. The Docker stack uses
 ```bash
 make test              # backend pytest (uses hermetic mocks; never the network)
 make test-frontend     # frontend vitest
+make test-node         # node fetcher vitest (node/)
+make test-go           # go worker, offline + vendored (never runs go get)
 make typecheck         # tsc --noEmit
 make lint              # eslint (frontend)
 make lint-ff           # oxlint (fast frontend lint)
@@ -39,16 +41,21 @@ make lint-ff           # oxlint (fast frontend lint)
 
 ### Test suite facts
 
-- 133 `test_*` functions across 12 files in `tests/` (API, infra, e2e,
-  normalization, browser wall-handling, dedup/stats, exporters, error
-  handling, job state machine, URL validation, GraphQL extractor).
-- Hermetically sealed: `conftest.py` installs a fake scraper, points the DB at
-  a temp path, and no test ever touches the network.
+- Backend: 297 `test_*` functions across 28 files in `tests/` (~309 collected
+  cases: API, infra, e2e, normalization, browser wall-handling, dedup/stats,
+  exporters, error handling, job state machine, URL validation, GraphQL
+  extractor, plus the node/go seam suites).
+- Hermetically sealed: `conftest.py` neutralises every seam flag (node, go),
+  installs a fake scraper, points the DB at a temp path, and no test ever
+  touches the network.
 - Frontend has vitest tests for `components/ui/badge` and `lib/utils`.
+- `node/` (fetch service) and `golang/` (compute worker) each ship their own
+  hermetic suites — vitest and `GOPROXY=off go test`. The Go tests never
+  resolve a module (everything is vendored) and never open a socket.
 
 ## CI
 
-Five GitHub Actions workflows (`.github/workflows/`), all triggered on push +
+Seven GitHub Actions workflows (`.github/workflows/`), all triggered on push +
 PR to branches `[main, master, testing]`:
 
 | Workflow | Runs |
@@ -58,6 +65,8 @@ PR to branches `[main, master, testing]`:
 | `typecheck.yml` | `tsc --noEmit` |
 | `eslint.yml` | `npm run lint` |
 | `lighthouse.yml` | build + start + `lhci autorun`, uploads `.lighthouseci/` artifact |
+| `node-test.yml` | `node/`: typecheck + vitest (Node 22) |
+| `go-test.yml` | `golang/`: gofmt + `GOPROXY=off go test -count=1 ./...` (vendored, offline) |
 
 `pytest.yml` paths-filter to `backend/**` + `tests/**`; `vitest/typecheck/eslint`
 to `frontend/**`.
