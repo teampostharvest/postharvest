@@ -26,7 +26,7 @@ brotli==1.2.0
 # --- optional: Playwright browser scraping -------------------------------------------------
 # Chromium is downloaded at image build time (Dockerfile backend stage); the
 # python driver alone cannot render pages without the browser binary.
-playwright==1.62.0
+playwright==1.63.0
 
 # --- PostgreSQL driver & database migrations ---------------------------------
 # DATABASE_URL / SUPABASE_DB_URL is set by docker-compose or environment.
