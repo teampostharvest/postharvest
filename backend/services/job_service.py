@@ -510,6 +510,9 @@ def _process_source(
                 options,
                 _make_progress_callback(job_id, source_id),
                 token.event if token else None,
+                # §8(c): go's idempotency guard keys on job:source so a
+                # retried Parse RPC is served from go's cache, not recomputed.
+                idempotency_key=f"{job_id}:{source_id}",
             )
     except Exception as exc:  # noqa: BLE001 - typed scraper errors map to codes
         if isinstance(exc, AppError):

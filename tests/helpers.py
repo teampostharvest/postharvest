@@ -209,7 +209,8 @@ def install_fake_scraper(
     """
     calls: list = []
 
-    def _fake_scrape_source(url, options=None, progress_cb=None, cancel_event=None):
+    def _fake_scrape_source(url, options=None, progress_cb=None, cancel_event=None,
+                            idempotency_key=None):
         calls.append((url, options))
         if options_seen is not None:
             options_seen.append(options)

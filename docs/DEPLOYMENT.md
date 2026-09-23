@@ -114,6 +114,8 @@ Key compose-level vars (all have defaults baked into the compose files):
 | `REDIS_URL` | `redis://redis:6379/0` | shared rate-limit store (compose service name) |
 | `USE_NODE` | 0 | delegate HTTP-mode fetches to the node service (finalplanv2 §14) |
 | `NODE_BASE_URL` | `http://node:9334` | node service base URL on the stack network |
+| `USE_GO_WORKER` | 0 | delegate the compute slice (parse -> normalize -> dedup) to the go worker's `POST /v1/parse` (finalplanv2 §5/§14; M7 flagged client) |
+| `GO_WORKER_BASE_URL` | `http://127.0.0.1:8080` | go worker base URL; **M6** ships the container and the compose override to `http://go:8080` |
 | `SCRAPE_TTL_SECONDS` | 0 | runtime TTL cache window per normalized URL; `0` = disarmed (backend's in-process consult seam, finalplanv2 §8) |
 | `COOKIE_ENCRYPTION_KEY` | *(empty)* | Fernet key for encrypting user FB cookies at rest (future) |
 | `WORKER_THREADS` | 4 | background scrape workers |

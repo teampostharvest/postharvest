@@ -143,6 +143,19 @@ class Settings(BaseSettings):
     # network (see docker/docker-compose.yml backend environment).
     node_base_url: str = "http://127.0.0.1:9334"
 
+    # --- go compute seam (finalplanv2 §5 "Go (Compute)" / §14 strangler) --
+    # When ON, HTTP-mode scrapes delegate the compute slice
+    # (parse -> normalize -> dedup) to the go worker's Phase-1 Parse RPC
+    # (POST /v1/parse) instead of running it in-process.  Same feature-flag
+    # discipline as use_node: OFF by default so the legacy Python pipeline
+    # stays byte-for-byte, and jobs only cross to go once parity is proven
+    # (tests/test_go_worker_seam.py + the golang/* goldens).
+    use_go_worker: bool = False
+    # Base URL of the go worker service. Host-dev default; Docker Compose
+    # overrides to http://go:8080 on the stack network once M6 ships the
+    # container.
+    go_worker_base_url: str = "http://127.0.0.1:8080"
+
     # --- runtime cache (finalplanv2 §8 "snappy" cache, slice C) -----------
     # In-process TTL window in front of the node-fetch seam
     # (backend.scraper._SCRAPE_TTL_CONSULT). 0 (default) keeps the consult

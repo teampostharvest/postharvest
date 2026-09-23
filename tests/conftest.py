@@ -67,6 +67,11 @@ os.environ["CANCEL_WAIT_SECONDS"] = "2"  # keep DELETE/cancellation tests fast
 os.environ["USE_NODE"] = "0"
 os.environ["USE_NODE_BROWSER"] = "0"
 os.environ["NODE_BASE_URL"] = "http://127.0.0.1:9334"
+# Neutralize the go compute seam from root `.env` for the same reason: the
+# seam hygiene tests assert `use_go_worker` is OFF by default and that
+# `go_worker_base_url` is the code default.
+os.environ["USE_GO_WORKER"] = "0"
+os.environ["GO_WORKER_BASE_URL"] = "http://127.0.0.1:8080"
 
 import pytest  # noqa: E402
 
@@ -103,6 +108,14 @@ def _check_environment() -> None:
     )
     assert s.node_base_url == "http://127.0.0.1:9334", (
         "NODE_BASE_URL leaked from root .env; seam tests assume the code default"
+    )
+    assert s.use_go_worker is False, (
+        "USE_GO_WORKER leaked from root .env into the test process; "
+        "seam hygiene tests assume the OFF default"
+    )
+    assert s.go_worker_base_url == "http://127.0.0.1:8080", (
+        "GO_WORKER_BASE_URL leaked from root .env; seam tests assume the "
+        "code default"
     )
 
 
