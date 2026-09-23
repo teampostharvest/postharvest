@@ -34,7 +34,7 @@ psycopg[binary]==3.3.5
 alembic>=1.13,<2
 
 # --- Firebase Authentication ------------------------------------------------
-firebase-admin>=6.5,<7
+firebase-admin>=7.6.0,<8
 
 # --- at-rest encryption of personal Facebook sessions ------------------------
 # Fernet-encrypts per-user cookie files when COOKIE_ENCRYPTION_KEY is set.
