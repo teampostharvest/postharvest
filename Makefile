@@ -111,6 +111,12 @@ backend-dev: ## Run uvicorn with reload against local code (cwd backend)
 backend-start: ## Run uvicorn (no reload) against local code
 	$(UVICORN) backend.main:app --host 127.0.0.1 --port 8000
 
+go-worker-build: ## Build the go worker binary (offline, vendored)
+	cd golang && GOPROXY=off go build -o /tmp/go-worker ./cmd/server
+
+go-server: ## Run the go worker server (host dev; PORT env, default 8080)
+	cd golang && go run ./cmd/server
+
 
 # ============================================================================
 # CLI (host, outside Docker)
