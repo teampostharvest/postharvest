@@ -70,7 +70,7 @@ make frontend-build / frontend-start
 make test               # pytest (backend + CLI + scraper)
 make test-frontend      # frontend vitest
 make test-node          # node fetcher vitest
-make test-go            # go-worker gofmt + go test (offline)
+make test-go            # golang gofmt + go test (offline)
 make test-all           # all four suites
 make checks             # typecheck + lint
 make cli-login ACCOUNT=myfb   # Python CLI Facebook login

@@ -1,4 +1,4 @@
-# go-worker — slice A (parse / normalize / dedup / export, in Go)
+# golang — slice A (parse / normalize / dedup / export, in Go)
 
 Plan: `plans/finalplanv2.md` §5 (Go, Compute) + §15 (Trigger Criteria).
 
@@ -9,7 +9,7 @@ without Playwright, and without ever fetching a real page.
 
 ## What moved in from Python (mirrors, byte for byte)
 
-| Python source of truth | Go mirror (`go-worker/`) |
+| Python source of truth | Go mirror (`golang/`) |
 |---|---|
 | `backend/scraper/normalizer.py` (33-key canonical schema, `normalize_post`, `clean_text`, `extract_hashtags`, `extract_mentions`, `classify_post_type`) | `normalize.go` |
 | `backend/scraper/dedup.py` (`make_fingerprint`, `dedup_key`, `dedup_posts`) | `dedup.go` |
