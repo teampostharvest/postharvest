@@ -15,15 +15,18 @@ without Playwright, and without ever fetching a real page.
 | `backend/scraper/dedup.py` (`make_fingerprint`, `dedup_key`, `dedup_posts`) | `dedup.go` |
 | `backend/exporters/csv_exporter.py` (`FLAT_COLUMNS`, `flatten_post`, UTF-8-BOM + `\r\n`) | `export.go` |
 | `backend/exporters/jsonl_exporter.py` (`PostJSONEncoder`, `ensure_ascii=False`, Python `(', ', ': ')` separators) | `export.go` |
+| `backend/exporters/xlsx_exporter.py` (4-sheet styled workbook, openpyxl) | `export_xlsx.go` |
 | `backend/scraper/parser.py` (`parse_page`, `extract_posts_from_graphql`, `_extract_posts_from_scripts`, GraphQL/JSON + timestamp helpers) | `parser/` |
 | Phase-1 Parse RPC (`shared/proto/postharvest.proto` `ParseRequest`/`ParseResponse`, finalplanv2.md §5/§6) | `httpapi/` |
 | §8(c) idempotency cache (Redis at deployment; hermetic in-memory seam now) | `idempotency/` |
 
 The core is **stdlib-only** for slice A (`regexp`, `crypto/sha256`,
-`encoding/json`, `encoding/csv`, `net/http`, `time`).  The only non-stdlib
-dependency is `github.com/PuerkitoBio/goquery v1.9.2` (the plan's §5 pin),
-**vendored** in `vendor/` so `GOPROXY=off go test ./...` still runs fully
-offline.  The plan's other §5 extras (chi, excelize v2.11.0+, testify) are
+`encoding/json`, `encoding/csv`, `net/http`, `time`) apart from the two
+vendored deps the plan's §5 pins: `github.com/PuerkitoBio/goquery v1.9.2`
+(parser, from M2) and `github.com/xuri/excelize/v2 v2.11.0` (XLSX, from
+M5 — the plan's `qax-os` module path was renamed upstream; see
+`dep_notes.go`).  Both live in `vendor/`, so `GOPROXY=off go test ./...`
+still runs fully offline.  The plan's other §5 extras (chi, testify) are
 *pin-notes only* in `dep_notes.go` and must not be fetched until a real
 deployment slice asks for them.
 
@@ -61,6 +64,21 @@ semantics — cached ParseResponse replay without re-parse, short-TTL expiry,
 `idemp:` keyspace — against an in-memory store implementing the same
 `Store` seam a deployment Redis client will implement later.
 
+`export_xlsx.go` (M5) mirrors `backend/exporters/xlsx_exporter.py`: the
+styled 4-sheet workbook (Posts / Engagement / Media / Metadata) with frozen
+header row, auto-filter, capped column widths, bold-blue header, custom
+date number format, hyperlinks and wrap alignment.  Openpyxl and excelize
+can never produce byte-identical `.xlsx` files (zip metadata differs), so
+the honest proof here is **logical cell-model equality**: `export_xlsx_test.go`
+unzips both the real-Python golden (`testdata/facebook_posts_golden.xlsx`,
+from `testdata/gen_xlsx_golden.py`) and the Go output and compares values,
+number formats, hyperlinks, panes, auto-filter ranges and column widths for
+all four sheets (the generator row in Metadata is asserted separately —
+each exporter honestly names itself).  Date cells are decoded from their
+Excel serials and proved to keep the original wall-clock time.  The flat
+rows themselves are additionally byte-proven by `export_test.go` (same
+`FLAT_COLUMNS` as the CSV path).
+
 ## §15 trigger check (honest gate record)
 
 `plans/finalplanv2.md` §15 says §3–§12 work is gated on **at least one of
@@ -79,13 +97,15 @@ Slice A was nevertheless authored now **because the user explicitly asked**
 ("go on do the rest … START GO WORKER PLS").  It is therefore strictly the
 hermetic, non-deployable compute core: the exact Go code the plan's §12
 would run, proven byte-equal to Python, with **no container, no feature
-flag flip, no deployment**.  Milestones M2/M3/M4 added the parser port
+flag flip, no deployment**.  Milestones M2/M3/M4/M5 added the parser port
 (`golang/parser/`, byte-vs-`parser.py` goldens), the Phase-1 HTTP surface
 (`golang/httpapi/`: `POST /v1/parse` plus `/healthz`/`/readyz`, byte-vs-real
-Python-Pipeline goldens), and the §8(c) idempotency seam (`golang/idempotency/`:
+Python-Pipeline goldens), the §8(c) idempotency seam (`golang/idempotency/`:
 `Store` interface + in-memory implementation; Redis stays a
-`dep_notes.go` pin until a deployment slice asks) — still hermetic
-(`httptest`, no sockets) and still
+`dep_notes.go` pin until a deployment slice asks), and the XLSX exporter
+(`export_xlsx.go`, cell-model-vs-real-openpyxl goldens; excelize was the
+second and last network fetch of the slice, required by §5's pin and
+vendored) — still hermetic (`httptest`, no sockets) and still
 unwired: nothing calls it over a socket and FastAPI's flagged Python client
 is milestone M7.  The §15 gate still holds for anything operational; this
 scaffolding only removes the "zero `.go` files" gap so that when a trigger
