@@ -20,7 +20,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user
+from backend.core import cache
 from backend.core.database import get_db
+from backend.core.logging import get_logger
 from backend.core.plans import normalize_plan, plan_limits
 from backend.models.posts import Post
 from backend.models.scrape_jobs import ScrapeJob
@@ -28,6 +30,8 @@ from backend.models.user import User
 from backend.scraper.browser_scraper import list_accounts
 
 router = APIRouter(tags=["usage"])
+
+logger = get_logger("api.usage")
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
 
@@ -57,6 +61,14 @@ def get_usage(
     current_user: User = Depends(get_current_user),
 ) -> UsageOut:
     """Return used/limit pairs for the caller's tier (``None`` = no ceiling)."""
+    cache_key = f"usage:{current_user.id}"
+    cached = cache.get_json(cache_key)
+    if cached is not None:
+        try:
+            return UsageOut.model_validate(cached)
+        except Exception:  # noqa: BLE001 - stale/corrupt entry, recompute below
+            logger.debug("Discarding unreadable usage cache entry", exc_info=True)
+
     plan = normalize_plan(current_user.plan)
     limits = plan_limits(plan)
 
@@ -99,7 +111,7 @@ def get_usage(
         or 0
     )
 
-    return UsageOut(
+    result = UsageOut(
         plan=plan,
         jobs_running=LimitOut(used=active_jobs, limit=limits["concurrent_jobs"]),
         personal_accounts=LimitOut(used=personal_used, limit=limits["personal_accounts"]),
@@ -107,3 +119,5 @@ def get_usage(
         posts_today=posts_today,
         jobs_today=jobs_today,
     )
+    cache.set_json(cache_key, result.model_dump(), ttl=cache.DEFAULT_TTL_SECONDS)
+    return result

@@ -20,6 +20,23 @@
 # PostgreSQL hardening anymore.
 
 services:
+  # redis — job-state mirror, cancel coordination AND shared rate-limit store;
+  # light hardening, no persistence.
+  redis:
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    mem_limit: ${REDIS_MEM_LIMIT:-320m}
+    cpus: ${REDIS_CPUS:-0.5}
+
   backend:
     read_only: true
     tmpfs:
@@ -49,6 +66,8 @@ services:
     mem_limit: ${FRONTEND_MEM_LIMIT:-512m}
     cpus: ${FRONTEND_CPUS:-1.0}
 
+# node — Facebook-facing fetch service: same hardening pattern (scraper
+  # code, /tmp scratch only).
   node:
     read_only: true
     tmpfs:
@@ -60,12 +79,19 @@ services:
     mem_limit: ${NODE_MEM_LIMIT:-256m}
     cpus: ${NODE_CPUS:-0.5}
 
-  redis:
-    # Rate-limit buckets are loss-tolerant and tiny; cap so a burst can't
-    # starve the box. No read_only/cap_drop here: redis writes its own /data
-    # volume and the hardening pattern is for OUR app processes, not stores.
-    mem_limit: ${REDIS_MEM_LIMIT:-128m}
-    cpus: ${REDIS_CPUS:-0.5}
+  # worker — optional arq out-of-process execution (--profile worker): same
+  # hardening as the backend; the worker runs untrusted-ish scraping code too
+  # and needs only /tmp scratch.
+  worker:
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${WORKER_MEM_LIMIT:-1g}
+    cpus: ${WORKER_CPUS:-1.5}
 
   nginx:
     read_only: true

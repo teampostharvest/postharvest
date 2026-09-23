@@ -23,8 +23,11 @@
 #   isolated  network: backend, node, go, redis         (internal: no route out)
 #
 # The database is managed Supabase (SUPABASE_DB_URL), NOT a compose service.
-# Playwright/Chromium is baked into the backend image; job state is in-process
-# worker threads, so the backend MUST stay a single replica.
+# Playwright/Chromium is baked into the backend image. Job status/progress/
+# cancel signals mirror to Redis (finalplanv2 §8b/§11 Phase 1); default
+# JOB_EXECUTION=inline runs jobs on in-process worker threads (backend stays a
+# single replica), and --profile worker + JOB_EXECUTION=arq opts into the
+# out-of-process arq worker (backend/worker.py) for horizontal scaling.
 name: postharvest
 
 services:
@@ -141,6 +144,17 @@ services:
       # Live session capture (loopback CDP; proxied same-origin by the API).
       SESSION_CAPTURE_PORT: ${SESSION_CAPTURE_PORT:-9333}
       SESSION_CAPTURE_TIMEOUT_SECONDS: ${SESSION_CAPTURE_TIMEOUT_SECONDS:-240.0}
+      # Redis job-state mirror + cancel coordination (finalplanv2 §8b/§11).
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Execution backend: inline (this process) | arq (separate worker).
+      JOB_EXECUTION: ${JOB_EXECUTION:-inline}
+      ARQ_QUEUE_NAME: ${ARQ_QUEUE_NAME:-arq:queue}
+      ARQ_JOB_TIMEOUT_SECONDS: ${ARQ_JOB_TIMEOUT_SECONDS:-21600}
+      # Role for role-aware Postgres pool sizing (api | worker).
+      PROCESS_ROLE: ${PROCESS_ROLE:-api}
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       # Bind-mount the repo data/ dir so the CLI (host) and the container share
       # the same cookie store / exports. Keep the file layout identical to
@@ -158,6 +172,57 @@ services:
     networks:
       - web
       - isolated
+
+  # =====================================================================
+  # redis — job-state mirror, cancel coordination AND shared rate-limit
+  # store (finalplanv2 §8b, §11 Phase 1).
+  # Status/progress mirrors + cancel flags live here, along with node's
+  # rate-limit buckets. No durability (save "" + appendonly no) — Postgres
+  # owns durability and a Redis outage degrades every seam to pre-Redis
+  # DB-only behaviour; the named volume keeps rate-limit buckets across
+  # restarts. Memory is capped (allkeys-lru) so a lost-key storm cannot OOM
+  # the VM. Internal-only: `isolated` network, reachable by nothing outside
+  # the stack.
+  # =====================================================================
+  redis:
+    image: redis:7.4-alpine
+    container_name: postharvest-redis
+    init: true
+    restart: unless-stopped
+    command: ["redis-server", "--save", '""', "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    stop_grace_period: 10s
+    networks:
+      - isolated
+
+  # =====================================================================
+  # worker — optional out-of-process execution (JOB_EXECUTION=arq)
+  # Same image as the backend, but runs the arq worker instead of the API
+  # (finalplanv2 §8b/§11 Phase 1). Gated behind the `worker` profile so the
+  # default single-process stack is unchanged; enable with:
+  #   JOB_EXECUTION=arq docker compose --profile prod --profile worker up -d
+  # It shares the backend's data volume (personal cookie jars) and DB/Redis
+  # but serves no HTTP, so the API healthcheck is disabled.
+  # =====================================================================
+  worker:
+    extends:
+      service: backend
+    container_name: postharvest-worker
+    profiles:
+      - worker
+    command: ["arq", "backend.worker.WorkerSettings"]
+    environment:
+      JOB_EXECUTION: arq
+      PROCESS_ROLE: worker
+    healthcheck:
+      disable: true
 
   # =====================================================================
   # frontend — Next.js standalone server on :3000
@@ -277,31 +342,6 @@ services:
         condition: service_started
     restart: unless-stopped
     stop_grace_period: 10s
-    networks:
-      - isolated
-
-  # =====================================================================
-  # redis — shared rate-limit store (finalplanv2 §8)
-  # Internal only: no published ports, `isolated` network (no route out).
-  # node (and future backend seams) reach it as `redis:6379`. Named volume
-  # keeps bucket state across restarts.
-  # =====================================================================
-  redis:
-    image: redis:7.4-alpine
-    container_name: postharvest-redis
-    init: true
-    restart: unless-stopped
-    # RDB snapshots + AOF are off (rate-limit/cache keys are loss-tolerant);
-    # the volume exists so a container restart does not cold-restart buckets.
-    command: ["redis-server", "--save", '""', "--appendonly", "no"]
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 15s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
     networks:
       - isolated
 

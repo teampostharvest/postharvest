@@ -39,3 +39,12 @@ firebase-admin>=6.5,<7
 # --- at-rest encryption of personal Facebook sessions ------------------------
 # Fernet-encrypts per-user cookie files when COOKIE_ENCRYPTION_KEY is set.
 cryptography==50.0.1
+
+# --- Redis job state & queue (finalplanv2 §8b/§11 Phase 1) -------------------
+# redis: sync client backing backend/core/job_state.py job-state keys. Pinned
+# to the 5.x line because arq 0.28.0 declares `redis[hiredis]>=4.2,<6`.
+# arq: Redis-backed job queue abstraction replacing the in-process
+# ThreadPoolExecutor (wired in the arq worker slice; listed now per the plan's
+# tool index so the dependency graph is complete for the backend image).
+redis==5.3.1
+arq==0.28.0

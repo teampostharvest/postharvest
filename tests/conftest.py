@@ -72,6 +72,11 @@ os.environ["NODE_BASE_URL"] = "http://127.0.0.1:9334"
 # `go_worker_base_url` is the code default.
 os.environ["USE_GO_WORKER"] = "0"
 os.environ["GO_WORKER_BASE_URL"] = "http://127.0.0.1:8080"
+# REDIS_URL — job-state mirrors degrade to DB-only when empty, which is
+# exactly the pre-Redis behaviour the hermetic suite assumes (no network,
+# no Redis daemon). The Redis-backed path is covered by dedicated fakeredis
+# tests in tests/test_job_state_redis.py.
+os.environ["REDIS_URL"] = ""
 
 import pytest  # noqa: E402
 
@@ -116,6 +121,11 @@ def _check_environment() -> None:
     assert s.go_worker_base_url == "http://127.0.0.1:8080", (
         "GO_WORKER_BASE_URL leaked from root .env; seam tests assume the "
         "code default"
+    )
+    assert not s.redis_url, (
+        "REDIS_URL leaked from root .env into the test process; the hermetic "
+        "suite must not open a real Redis connection. The Redis-backed job "
+        "state path is covered by fakeredis tests instead."
     )
 
 

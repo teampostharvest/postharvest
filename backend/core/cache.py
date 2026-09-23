@@ -100,3 +100,27 @@ class TTLCache:
 
     def __contains__(self, key: str) -> bool:
         return self.get(key) is not None
+
+
+# ---------------------------------------------------------------------------
+# Merge seam (feat/redis-job-state): the Redis-backed read cache (quota-usage,
+# identity, saved-accounts) lives in its own module — `backend.core.cache_redis`
+# — and is re-exported here so `from backend.core import cache` call sites get
+# BOTH caches through one import path, exactly as each merged branch expected.
+# ---------------------------------------------------------------------------
+from backend.core import job_state  # noqa: E402  (compat: `cache.job_state`)
+from backend.core.cache_redis import (  # noqa: E402  (import placed after class)
+    ACCOUNTS_TTL_SECONDS,
+    DEFAULT_TTL_SECONDS,
+    USER_TTL_SECONDS,
+    delete,
+    get_accounts,
+    get_json,
+    get_user,
+    invalidate_accounts,
+    invalidate_usage,
+    invalidate_user,
+    set_accounts,
+    set_json,
+    set_user,
+)

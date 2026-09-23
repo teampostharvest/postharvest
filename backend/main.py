@@ -30,10 +30,11 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.api import accounts, admin, exports, health, jobs, scrape, usage
+from backend.core import job_state
 from backend.core.config import get_settings
 from backend.core.database import init_db
 from backend.core.exceptions import AppError
-from backend.core.job_manager import JobManager
+from backend.core.job_queue import get_job_queue
 from backend.core.logging import get_logger, setup_logging
 
 logger = get_logger("main")
@@ -56,12 +57,17 @@ async def lifespan(_app: FastAPI):
     if settings.scrape_ttl_seconds > 0:
         logger.info("Runtime TTL cache armed (%.1fs per normalized URL)",
                     settings.scrape_ttl_seconds)
-    # Reconcile persisted job rows with the (empty) fresh worker pool:
-    # orphaned `running` jobs fail with an audit row, `queued` jobs resume.
-    # Best-effort — the sweep never raises, so boot cannot block on it.
-    from backend.services.job_service import sweep_orphaned_jobs
+    # Reconcile persisted job rows with the fresh worker pool: orphaned
+    # `running` jobs fail with an audit row, `queued` jobs resume. Best-effort
+    # — the sweep never raises, so boot cannot block on it. When execution is
+    # outsourced to an arq worker the API does not own jobs, so it must not
+    # fail rows a worker may still be running; the worker sweeps on its boot.
+    if settings.job_execution == "arq":
+        logger.info("Job execution is arq-backed; skipping API-side startup sweep")
+    else:
+        from backend.services.job_service import sweep_orphaned_jobs
 
-    sweep_orphaned_jobs()
+        sweep_orphaned_jobs()
     # Log the URL the engine actually opened (database.py prefers
     # SUPABASE_DB_URL over DATABASE_URL) rather than the raw setting.
     from backend.core import database as _db
@@ -69,7 +75,8 @@ async def lifespan(_app: FastAPI):
     effective_url = str(_db.engine.url).replace("******", "***")
     logger.info("Application started (db=%s)", effective_url)
     yield
-    JobManager.get().shutdown()
+    get_job_queue().shutdown()
+    job_state.close()  # drop the Redis client (best-effort, degraded when unset)
     logger.info("Application shutdown complete")
 
 
