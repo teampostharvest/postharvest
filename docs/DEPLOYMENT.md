@@ -100,9 +100,12 @@ Postgres compose service anymore.
 Playwright + Chromium are baked into the backend image; the frontend uses
 Next.js `standalone` output.
 
-> **Single replica only.** Job state lives in in-process worker threads — the
-> backend must never be scaled horizontally. Scale nginx/frontend as needed;
-> keep backend at one replica (see ROADMAP non-goals).
+> **Single replica by default.** In `JOB_EXECUTION=inline` mode (the default)
+> job state is mirrored to Redis and execution runs on in-process worker
+> threads — the backend must stay at one replica, scale nginx/frontend as
+> needed. Setting `JOB_EXECUTION=arq` plus `--profile worker` switches
+> execution to the out-of-process arq worker (`backend/worker.py`), which is
+> the multi-replica-capable path.
 
 ## Environment variables
 
@@ -111,7 +114,10 @@ Key compose-level vars (all have defaults baked into the compose files):
 | Variable | Default | Meaning |
 |---|---|---|
 | `SUPABASE_DB_URL` | *(empty)* | managed Postgres DSN (no compose postgres service) |
-| `REDIS_URL` | `redis://redis:6379/0` | shared rate-limit store (compose service name) |
+| `REDIS_URL` | `redis://redis:6379/0` | shared store: job-state mirror + cancel coordination, `cache:` read cache, rate-limit buckets, go idempotency (compose service name; any outage degrades to DB-only/no-cache paths) |
+| `JOB_EXECUTION` | `inline` | `inline` = in-process worker threads (single replica) · `arq` = out-of-process worker (`--profile worker`) |
+| `PROCESS_ROLE` | `api` | `api` \| `worker` — role-aware Supabase pool sizing (`backend/core/database.py`) |
+| `ARQ_QUEUE_NAME` / `ARQ_JOB_TIMEOUT_SECONDS` | `arq:queue` / `21600` | arq worker queue name and per-job timeout (used only when `JOB_EXECUTION=arq`) |
 | `USE_NODE` | 0 | delegate HTTP-mode fetches to the node service (finalplanv2 §14) |
 | `NODE_BASE_URL` | `http://node:9334` | node service base URL on the stack network |
 | `USE_GO_WORKER` | 0 | delegate the compute slice (parse -> normalize -> dedup) to the go worker's `POST /v1/parse` (finalplanv2 §5/§14; M7 flagged client) |
