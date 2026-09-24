@@ -1,3 +1,19 @@
+# [1.6.0](https://github.com/teampostharvest/postharvest/compare/v1.5.3...v1.6.0) (2026-09-24)
+
+
+### Bug Fixes
+
+* **obs:** flat alerting provisioning layout + cadvisor healthcheck URL ([481b99b](https://github.com/teampostharvest/postharvest/commit/481b99b98028c79938c16ac0e5e476c7c86bc8af))
+* **obs:** keep Grafana alerting provisioning valid when webhook URL is unset ([3d799dc](https://github.com/teampostharvest/postharvest/commit/3d799dc2044a630728a8cdc8269c8e8d09f72fe3))
+* **obs:** use canonical oliver006/redis_exporter image for the redis metrics exporter ([f8cf07e](https://github.com/teampostharvest/postharvest/commit/f8cf07e53f51d7e2c19ae680f332ee586d01c355))
+
+
+### Features
+
+* **backend:** node feed-walk seam behind the GUEST_FEED_WALK flag ([9e17a87](https://github.com/teampostharvest/postharvest/commit/9e17a879f90c1f0ebd445bc01f6cfc3486512f82))
+* **node:** crawlee feed-frame transport with session-pool rotation ([05a91ed](https://github.com/teampostharvest/postharvest/commit/05a91ed7d4ad1f7d503764fbd583d6642efbb6cd))
+* **obs:** monitoring platform — prometheus, grafana, exporters, dashboards, alerting (D13–D17) ([65c791c](https://github.com/teampostharvest/postharvest/commit/65c791c0ec2459ca7713aadac55992a7d62cb2f1))
+
 ## [1.5.3](https://github.com/teampostharvest/postharvest/compare/v1.5.2...v1.5.3) (2026-09-24)
 
 
