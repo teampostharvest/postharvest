@@ -13,6 +13,19 @@ One ``POST /feed-fetch`` round trip == one raw frame:
 
     {status_code, final_url, raw_payload (base64), session_id, blocked}
 
+The frame request is extended for the GraphQL pagination walk:
+
+    {target_url, cursor, method, form, referer}
+
+* ``target_url`` — the URL to fetch (the page for frame 1, the GraphQL
+  endpoint for every frame after).
+* ``cursor``    — the opaque frame spec (see below); node passes it through
+  verbatim, never interprets it.
+* ``method``    — ``GET`` (page frames) or ``POST`` (GraphQL frames).
+* ``form``      — form-encoded body fields for POST frames (string->string).
+* ``referer``   — the page being walked, sent as the Referer header on POST
+  frames so the GraphQL endpoint sees the walk origin.
+
 This module exposes:
 
 * :class:`NodeFeedClient` — thin HTTP client for ``POST /feed-fetch``,
@@ -22,14 +35,38 @@ This module exposes:
   batches of parsed posts — the feed-walk shape ``paginate()`` drives.
 * :func:`walk_feed_via_node` — the end-to-end seam (Phase 3 wires this
   into the crawler path behind the ``GUEST_FEED_WALK`` flag).
+
+Feed-walk mechanism (proven live, Phase 2)
+------------------------------------------
+Frame 1 is a ``GET`` of the page: it embeds the GraphQL feed bootstrap — the
+``queryID`` (``28338492715759825``) plus the Relay preloader variables
+template and the initial pagination cursor.  Every later frame is a guest
+``POST`` to ``https://www.facebook.com/api/graphql/`` with a form body of
+``doc_id`` + the preloader variables (``count`` bumped to 3, ``cursor``
+advanced) plus the two Relay bookkeeping fields.  Each response is a
+concatenated stream of top-level JSON documents; the story nodes live under
+``data.user.timeline_list_feed_units.edges[].node`` (first document) and
+``data.node`` (later documents), and the trailing document carries the next
+``data.page_info`` (``has_next_page`` + ``end_cursor``).
+
+The opaque frame cursor is a JSON spec::
+
+    {"kind": "gql",
+     "url": "https://www.facebook.com/api/graphql/",
+     "doc_id": "...", "count": 3, "end_cursor": "...",
+     "variables": {...preloader template...}}
+
+Parsing stays in Python by design: node never parses frames.
 """
 
 from __future__ import annotations
 
 import base64
+import json
+import re
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 import httpx
 
@@ -43,12 +80,14 @@ from backend.scraper.errors import (
     Timeout,
 )
 from backend.scraper.pagination import PageResult, PaginationResult, paginate
-from backend.scraper.parser import ParsedPage, parse_page
+from backend.scraper.parser import ParsedPage, extract_posts_from_graphql_body, parse_page
 
 __all__ = [
     "FeedFrame",
+    "FrameRequest",
     "FeedWalkAdapter",
     "NodeFeedClient",
+    "extract_feed_bootstrap",
     "walk_feed_via_node",
 ]
 
@@ -67,6 +106,20 @@ _RETRYABLE_TRANSPORT_ERRORS = (
     httpx.RemoteProtocolError,
 )
 
+#: GraphQL feed endpoint for frames 2+ (proven live against humansofnewyork).
+GQL_ENDPOINT = "https://www.facebook.com/api/graphql/"
+
+#: Stories requested per GraphQL frame (~3 observed live).
+GQL_FRAME_COUNT = 3
+
+#: Relay bookkeeping sent alongside doc_id + variables (proven live probe).
+GQL_CALLER_CLASS = "RelayModern"
+GQL_FRIENDLY_NAME = "ProfileCometTimelineFeedQuery"
+
+#: Anchor that uniquely identifies the timeline-feed Relay preloader in the
+#: frame-1 HTML (the block that carries queryID + variables template).
+PRELOADER_ANCHOR = '"preloaderID":"adp_ProfileCometTimelineFeedQueryRelayPreloader_'
+
 
 @dataclass
 class FeedFrame:
@@ -79,6 +132,32 @@ class FeedFrame:
     session_id: Optional[str] = None
     attempts: int = 0
     elapsed: float = 0.0
+
+
+@dataclass
+class FrameRequest:
+    """One node frame request — what to fetch and how.
+
+    ``method`` is ``GET`` for page frames and ``POST`` for GraphQL frames;
+    ``form`` carries the form-encoded body fields for POST frames (values
+    are always strings); ``referer`` names the page being walked so POST
+    frames reach the GraphQL endpoint with the walk origin.
+    """
+
+    url: str
+    cursor: Optional[str] = None
+    method: str = "GET"
+    form: Optional[Dict[str, str]] = None
+    referer: Optional[str] = None
+
+
+@dataclass
+class FeedBootstrap:
+    """The feed-walk bootstrap extracted from frame 1 (the page HTML)."""
+
+    doc_id: str
+    variables: Dict[str, Any]
+    end_cursor: str
 
 
 class NodeFeedClient:
@@ -121,8 +200,15 @@ class NodeFeedClient:
         frame_url: str,
         *,
         cursor: Optional[str] = None,
+        method: str = "GET",
+        form: Optional[Dict[str, str]] = None,
+        referer: Optional[str] = None,
     ) -> FeedFrame:
-        """POST one frame URL to node and map the result into a FeedFrame.
+        """POST one frame request to node and map the result into a FeedFrame.
+
+        The JSON payload mirrors ``FeedFrameRequest`` (node/src/feed/types.ts):
+        ``target_url`` plus the optional ``cursor`` / ``method`` / ``form`` /
+        ``referer`` frame fields.
 
         Raises ScraperError subtypes mirroring the unified node envelope:
         ``rate_limited`` / ``page_unavailable`` / ``timeout`` /
@@ -130,7 +216,9 @@ class NodeFeedClient:
         ``ExtractionFailure(code="network_error")``.
         """
         started = time.monotonic()
-        response = self._post(frame_url, cursor=cursor)
+        response = self._post(
+            frame_url, cursor=cursor, method=method, form=form, referer=referer
+        )
         if response.status_code == 200:
             try:
                 data = response.json()
@@ -169,14 +257,28 @@ class NodeFeedClient:
 
         raise _map_node_error(code, message)
 
-    def _post(self, frame_url: str, *, cursor: Optional[str]) -> httpx.Response:
+    def _post(
+        self,
+        frame_url: str,
+        *,
+        cursor: Optional[str],
+        method: str,
+        form: Optional[Dict[str, str]],
+        referer: Optional[str],
+    ) -> httpx.Response:
         """POST ``/feed-fetch`` with limited retry+backoff on *fast*
         transport failures (node mid-deploy blips). Timeouts and definitive
         envelope answers are never retried (see module docstring).
         """
-        payload: dict[str, Any] = {"target_url": frame_url}
+        payload: Dict[str, Any] = {"target_url": frame_url}
         if cursor is not None:
             payload["cursor"] = cursor
+        if method and method != "GET":
+            payload["method"] = method
+        if form:
+            payload["form"] = form
+        if referer:
+            payload["referer"] = referer
         backoff = 0.0
         for attempt in range(self.max_retries + 1):
             if attempt:
@@ -212,28 +314,145 @@ class NodeFeedClient:
 
 
 # ---------------------------------------------------------------------------
+# Bootstrap + frame-spec helpers (frame-1 HTML -> GraphQL cursor mechanics)
+# ---------------------------------------------------------------------------
+
+
+def extract_feed_bootstrap(html: str) -> Optional[FeedBootstrap]:
+    """Extract the feed-walk bootstrap from frame 1 (the page HTML).
+
+    Looks for the timeline-feed Relay preloader block and pulls out the
+    ``queryID`` (doc_id), the preloader ``variables`` template, and the
+    initial ``end_cursor`` (the first cursor Facebook deposits next to
+    ``"has_next_page": true``).
+
+    Returns ``None`` when the frame carries no such bootstrap (e.g. a block
+    or login wall) — the caller then degrades to a one-frame seam.
+    """
+    if not html:
+        return None
+    start = html.find(PRELOADER_ANCHOR)
+    if start < 0:
+        return None
+
+    # queryID right after the preloaderID anchor.
+    qs = html.find('"queryID":"', start)
+    if qs < 0:
+        return None
+    qs += len('"queryID":"')
+    qe = html.find('"', qs)
+    if qe < 0:
+        return None
+    doc_id = html[qs:qe]
+    if not doc_id.isdigit():
+        return None
+
+    # balanced-brace variables object following "variables":.
+    vs = html.find('"variables":', qs)
+    if vs < 0:
+        return None
+    begin = html.find("{", vs)
+    if begin < 0:
+        return None
+    depth = 0
+    i = begin
+    while i < len(html):
+        if html[i] == "{":
+            depth += 1
+        elif html[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    try:
+        variables = json.loads(html[begin : i + 1])
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(variables, dict):
+        return None
+
+    hp = html.find('"has_next_page":true')
+    if hp < 0:
+        return None
+    m = re.search(r'"end_cursor":"([^"]+)"', html[hp : hp + 8000])
+    if not m:
+        return None
+
+    return FeedBootstrap(doc_id=doc_id, variables=variables, end_cursor=m.group(1))
+
+
+def _gql_spec(bootstrap: FeedBootstrap, end_cursor: str) -> str:
+    """Encode a GraphQL frame spec (the opaque paginate() cursor)."""
+    return json.dumps(
+        {
+            "kind": "gql",
+            "url": GQL_ENDPOINT,
+            "doc_id": bootstrap.doc_id,
+            "count": GQL_FRAME_COUNT,
+            "end_cursor": end_cursor,
+            "variables": bootstrap.variables,
+        }
+    )
+
+
+def _graphql_form(spec: Dict[str, Any]) -> Dict[str, str]:
+    """Build the form-encoded body for one GraphQL frame from a spec.
+
+    ``variables`` is the frame-1 preloader template mutated exactly like the
+    validated live probe: ``count`` bumped to the per-frame fetch size and
+    ``cursor`` set to the current page token.
+    """
+    variables = dict(spec.get("variables") or {})
+    variables["count"] = int(spec.get("count") or GQL_FRAME_COUNT)
+    variables["cursor"] = spec["end_cursor"]
+    return {
+        "doc_id": str(spec["doc_id"]),
+        "variables": json.dumps(variables),
+        "fb_api_caller_class": GQL_CALLER_CLASS,
+        "fb_api_req_friendly_name": GQL_FRIENDLY_NAME,
+    }
+
+
+def _next_gql_spec(spec: Dict[str, Any], page_info: Optional[dict]) -> Optional[str]:
+    """Next frame spec from a GraphQL response's ``data.page_info``.
+
+    Stops the walk when the response carries no next cursor (the page not
+    present, or ``has_next_page`` false).
+    """
+    if not page_info:
+        return None
+    if not page_info.get("has_next_page"):
+        return None
+    next_end = page_info.get("end_cursor")
+    if not next_end:
+        return None
+    spec = dict(spec)
+    spec["end_cursor"] = next_end
+    return json.dumps(spec)
+
+
+# ---------------------------------------------------------------------------
 # Feed-walk adapter (PageFetcher protocol, backend/scraper/pagination.py)
 # ---------------------------------------------------------------------------
+
 
 class FeedWalkAdapter:
     """Turn node feed frames into ``PageResult`` batches for ``paginate()``.
 
-    Each ``fetch_page`` call fetches ONE frame via node (a bound
-    ``fetch_frame`` callable), parses the posts in Python, and returns them
-    with the next-frame cursor.
+    Frame 1 (``cursor=None``) GETs the page, parses the HTML for posts and
+    page metadata, and extracts the GraphQL bootstrap; the next cursor is a
+    ``{"kind": "gql", ...}`` frame spec.  Every later frame POSTs the spec to
+    the GraphQL endpoint and parses the concatenated JSON response into
+    ``ParsedPost``s, with the next cursor taken from the trailing
+    ``data.page_info`` document.
 
-    ``next_cursor`` extraction is the Phase 2 piece — the FB-specific
-    pagination token (mbasic ``?page=N`` / GraphQL cursor) — extracted from
-    the frame in Python. Until it lands the walk stops after the first frame
-    (``has_more=False``), making this adapter a one-frame seam exactly
-    equivalent to today's single shot. Extraction stays in Python by design:
-    node never parses frames.
+    Parsing stays in Python by design: node never parses frames.
     """
 
     def __init__(
         self,
         target_url: str,
-        fetch_frame: Callable[[str, Optional[str]], FeedFrame],
+        fetch_frame: Callable[[FrameRequest], FeedFrame],
         *,
         parse: Callable[..., ParsedPage] = parse_page,
         handle: Optional[str] = None,
@@ -250,15 +469,27 @@ class FeedWalkAdapter:
         cancel_event: Optional[Any] = None,
     ) -> PageResult:
         del cancel_event  # cancellation is checked by paginate() between rounds
-        if cursor is not None:
-            # cursor encodes the next frame URL (Phase 2: token/URL).
-            frame_url: str = cursor
-        else:
-            frame_url = self._target_url
 
-        frame = self._fetch_frame(frame_url, cursor)
+        if cursor is not None:
+            try:
+                spec = json.loads(cursor)
+            except ValueError:
+                spec = None
+        else:
+            spec = None
+
+        if spec and spec.get("kind") == "gql":
+            return self._fetch_graphql_frame(spec)
+        # Frame 1 (or a plain-URL cursor for forward compat): GET + parse.
+        frame_url = cursor if (cursor and spec is None) else self._target_url
+        frame = self._fetch_frame(
+            FrameRequest(url=frame_url, cursor=cursor, method="GET")
+        )
         parsed = self._parse(frame.html, page_url=frame.final_url, handle=self._handle)
-        next_cursor = self._extract_next_frame_url(frame, parsed)
+
+        # GraphQL walk continues when frame 1 embeds a feed bootstrap.
+        bootstrap = extract_feed_bootstrap(frame.html)
+        next_cursor = _gql_spec(bootstrap, bootstrap.end_cursor) if bootstrap else None
 
         return PageResult(
             items=list(parsed.posts) if parsed.posts else [],
@@ -273,15 +504,35 @@ class FeedWalkAdapter:
             },
         )
 
-    def _extract_next_frame_url(
-        self, frame: FeedFrame, parsed: ParsedPage
-    ) -> Optional[str]:
-        """Phase 2: extract the next-frame token from this frame.
+    def _fetch_graphql_frame(self, spec: Dict[str, Any]) -> PageResult:
+        """POST one GraphQL frame and parse the concatenated JSON response."""
+        form = _graphql_form(spec)
+        frame = self._fetch_frame(
+            FrameRequest(
+                url=str(spec["url"]),
+                cursor=json.dumps(spec),
+                method="POST",
+                form=form,
+                referer=self._target_url,
+            )
+        )
+        posts, page_info = extract_posts_from_graphql_body(
+            frame.html, frame.final_url
+        )
+        next_cursor = _next_gql_spec(spec, page_info)
 
-        Returns ``None`` for now — the walk is a one-frame seam until the
-        FB pagination cursor extraction lands.
-        """
-        return None
+        return PageResult(
+            items=list(posts),
+            next_cursor=next_cursor,
+            has_more=next_cursor is not None,
+            meta={
+                "frame_status": frame.status_code,
+                "final_url": frame.final_url,
+                "blocked": frame.blocked,
+                "session_id": frame.session_id,
+                "posts": len(posts),
+            },
+        )
 
 
 def walk_feed_via_node(
@@ -308,22 +559,41 @@ def walk_feed_via_node(
             fetch_frame=_bound_fetch_frame(client),
             handle=handle,
         )
-        return paginate(
+        result = paginate(
             adapter,
             max_items=max_items,
             max_rounds=max_rounds,
             cancel_event=cancel_event,
         )
+        if result.stop_reason == "fetch_error":
+            # A hard frame failure (blocked after rotation, rate limit,
+            # timeout) surfaces as a per-source error — same semantics as
+            # node_fetch: never a silent partial walk. paginate keeps the
+            # original exception next to its string form (meta["error_exc"]).
+            exc = result.meta.get("error_exc")
+            if isinstance(exc, ScraperError):
+                raise exc
+            raise ExtractionFailure(
+                str(result.meta.get("error") or "feed walk failed"),
+                code="network_error",
+            )
+        return result
     finally:
         if owns_client:
             client.close()
 
 
-def _bound_fetch_frame(client: NodeFeedClient) -> Callable[[str, Optional[str]], FeedFrame]:
-    """Bind a client's fetch_frame to the adapter's 2-arg callable shape."""
+def _bound_fetch_frame(client: NodeFeedClient) -> Callable[[FrameRequest], FeedFrame]:
+    """Bind a client's fetch_frame to the adapter's FrameRequest callable."""
 
-    def _fetch(frame_url: str, cursor: Optional[str]) -> FeedFrame:
-        return client.fetch_frame(frame_url, cursor=cursor)
+    def _fetch(req: FrameRequest) -> FeedFrame:
+        return client.fetch_frame(
+            req.url,
+            cursor=req.cursor,
+            method=req.method,
+            form=req.form,
+            referer=req.referer,
+        )
 
     return _fetch
 
