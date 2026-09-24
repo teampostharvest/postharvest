@@ -56,6 +56,7 @@ __all__ = [
     "ParsedPage",
     "ParsedPost",
     "extract_posts_from_graphql",
+    "extract_posts_from_graphql_body",
     "parse_page",
     "parse_timestamp",
     "parse_count",
@@ -759,29 +760,138 @@ def _iter_json_objects(text: str):
         i = end
 
 
+def _timeline_story_nodes(tl) -> List[dict]:
+    """Flatten ``{edges: [{node: Story}]}`` (or a Story node itself) into dicts."""
+    found: List[dict] = []
+    if not isinstance(tl, dict):
+        return found
+    # A bare Story node directly under the parent (data.user / data.node).
+    if tl.get("__typename") == "Story" and tl.get("post_id"):
+        found.append(tl)
+    for edge in tl.get("edges") or []:
+        child = edge.get("node") if isinstance(edge, dict) else None
+        if isinstance(child, dict) and child.get("post_id"):
+            found.append(child)
+    return found
+
+
 def _graphql_story_nodes(payload) -> List[dict]:
     """Flatten ``/api/graphql/`` response objects into candidate story dicts.
 
     Looks for ``data.node`` entries of ``__typename`` ``Story`` plus the
-    ``data.node.timeline_list_feed_units.edges[].node`` list.
+    timeline edge lists under both ``data.node.timeline_list_feed_units``
+    (browser-snapshot shape) and ``data.user.timeline_list_feed_units``
+    (guest feed-walk shape — the walk's GraphQL frames carry their story
+    nodes under ``data.user`` on the first query document).
     """
     if not isinstance(payload, dict):
         return []
     data = payload.get("data")
     if not isinstance(data, dict):
         return []
-    node = data.get("node")
     found: List[dict] = []
+    node = data.get("node")
     if isinstance(node, dict):
         if node.get("__typename") == "Story" and node.get("post_id"):
             found.append(node)
-        tl = node.get("timeline_list_feed_units")
-        if isinstance(tl, dict):
-            for edge in tl.get("edges") or []:
-                child = edge.get("node") if isinstance(edge, dict) else None
-                if isinstance(child, dict) and child.get("post_id"):
-                    found.append(child)
+        found.extend(_timeline_story_nodes(node.get("timeline_list_feed_units")))
+    user = data.get("user")
+    if isinstance(user, dict):
+        found.extend(_timeline_story_nodes(user.get("timeline_list_feed_units")))
     return found
+
+
+def _graphql_page_info(payload) -> Optional[dict]:
+    """Extract ``data.page_info`` (the pagination cursor batch) if present.
+
+    The feed walk's GraphQL responses end with a tail document whose
+    ``data.page_info`` carries ``has_next_page`` + the next ``end_cursor``.
+    """
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    pi = data.get("page_info")
+    if isinstance(pi, dict) and ("has_next_page" in pi or "end_cursor" in pi):
+        return pi
+    return None
+
+
+def extract_posts_from_graphql_body(
+    body: str,
+    page_url: str,
+) -> Tuple[List[ParsedPost], Optional[dict]]:
+    """Parse a raw concatenated ``/api/graphql/`` feed body into posts + cursor.
+
+    The guest feed walk (``backend/services/node_feed.py``) POSTs ``doc_id`` +
+    preloader variables to ``/api/graphql/`` and receives several JSON
+    documents back-to-back (one per query slice).  Each document may carry a
+    story under ``data.node`` or under ``data.user.timeline_list_feed_units``
+    (first document); the tail document carries ``data.page_info`` with
+    ``has_next_page`` + the next ``end_cursor``.
+
+    :returns: ``(posts, page_info)`` — deduped :class:`ParsedPost` list and the
+        page_info dict (``None`` when the body carries none).
+    """
+    if not body or '"post_id"' not in body:
+        return [], None
+    posts: List[ParsedPost] = []
+    seen: set = set()
+    page_info: Optional[dict] = None
+    for obj in _iter_json_objects(body):
+        for story in _graphql_story_nodes(obj):
+            pid = str(story.get("post_id") or "")
+            if pid and pid in seen:
+                continue
+            if pid:
+                seen.add(pid)
+            try:
+                post = _graphql_story_to_post(story, page_url)
+            except Exception:  # one bad node must not kill the batch
+                continue
+            if post and (post.post_id or post.text):
+                posts.append(post)
+        pi = _graphql_page_info(obj)
+        if pi is not None:
+            page_info = pi
+    return posts, page_info
+
+
+def extract_posts_from_graphql(html: str, page_url: str) -> List[ParsedPost]:
+    """Extract posts from embedded ``/api/graphql/`` feed payloads.
+
+    ``fetch_with_browser`` captures the browser's own Comet feed API responses
+    and stores each one inside a ``<script type="application/json"
+    data-fb-graphql-feed="1">…</script>`` block of the returned snapshot.
+    Each response is a sequence of JSON documents; story nodes carry
+    ``post_id``, ``creation_time``, the rendered ``message.text``, media
+    attachments and engagement counts.  This intentionally complements (not
+    replaces) the DOM/script heuristics used for anonymous public pages.
+    """
+    if not html or '"post_id"' not in html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    posts: List[ParsedPost] = []
+    seen: set = set()
+    for tag in soup.find_all("script", attrs={_GRAPHQL_SCRIPT_MARKER: True}):
+        raw = tag.get_text()
+        if not raw or '"post_id"' not in raw:
+            continue
+        for obj in _iter_json_objects(raw):
+            for story in _graphql_story_nodes(obj):
+                pid = str(story.get("post_id") or "")
+                if pid and pid in seen:
+                    continue
+                if pid:
+                    seen.add(pid)
+                try:
+                    post = _graphql_story_to_post(story, page_url)
+                except Exception:  # one bad node must not kill the batch
+                    continue
+                if post and (post.post_id or post.text):
+                    posts.append(post)
+    return posts
 
 
 def _graphql_story_to_post(story: dict, page_url: str) -> Optional[ParsedPost]:
