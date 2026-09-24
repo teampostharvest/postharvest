@@ -28,6 +28,9 @@ node_modules/
 out/
 *.tsbuildinfo
 next-env.d.ts.bak
+# Crawlee local storage artifact (produced by the feed walker's default
+# memory-storage fallback when run from the repo root).
+node/storage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
