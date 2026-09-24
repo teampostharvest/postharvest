@@ -376,7 +376,9 @@ def test_capture_viewer_page_served_for_live_capture(client):
         assert "Live login" in r.text
         assert "/api/accounts/capture/" in r.text
         assert "Input.dispatchMouseEvent" in r.text
-        assert "Page.captureScreenshot" in r.text
+        # push-streamed frames (screencast), not a per-frame screenshot poll
+        assert "Page.startScreencast" in r.text
+        assert "Page.screencastFrame" in r.text
     finally:
         browser_scraper._CAPTURES.clear()
 

@@ -70,7 +70,7 @@ VIEWER_HTML = """<!doctype html>
 
   var ws = null, msgId = 0, pending = {};
   var devW = 0, devH = 0;
-  var shotInFlight = false, lastFrameAt = 0, closed = false;
+  var lastFrameAt = 0, fallbackShot = false, closed = false;
   var lastMoveAt = 0;
 
   function setStatus(state, text) {
@@ -105,31 +105,30 @@ VIEWER_HTML = """<!doctype html>
     send("Page.bringToFront", {});
   }
 
-  function pollMs() {
-    return (performance.now() - lastFrameAt) < 1500 ? 260 : 700;
+  function render(data) {
+    lastFrameAt = performance.now();
+    try {
+      var bin = atob(data), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var prev = img.src;
+      img.src = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+      if (prev && prev.indexOf("blob:") === 0) URL.revokeObjectURL(prev);
+      hideCover();
+    } catch (e) { /* transient decode hiccup — keep streaming */ }
   }
-  function scheduleShot(ms) {
-    setTimeout(takeShot, ms === undefined ? pollMs() : ms);
-  }
-  function takeShot() {
-    if (closed || shotInFlight || !ws || ws.readyState !== 1) { scheduleShot(); return; }
-    shotInFlight = true;
+  // Fallback: if the push stream ever stalls (no frame for a while), grab one
+  // screenshot. Only fires when the stream is quiet — normal operation streams.
+  function takeFallbackShot() {
+    if (closed || fallbackShot || !ws || ws.readyState !== 1) return;
+    fallbackShot = true;
     send("Page.captureScreenshot", { format: "jpeg", quality: 62 }, function (res) {
-      shotInFlight = false;
-      if (res && res.data) {
-        lastFrameAt = performance.now();
-        try {
-          var bin = atob(res.data), bytes = new Uint8Array(bin.length);
-          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          var prev = img.src;
-          img.src = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
-          if (prev && prev.indexOf("blob:") === 0) URL.revokeObjectURL(prev);
-          hideCover();
-        } catch (e) { /* transient decode hiccup — keep polling */ }
-      }
-      scheduleShot();
+      fallbackShot = false;
+      if (res && res.data) render(res.data);
     });
   }
+  window.setInterval(function () {
+    if (performance.now() - lastFrameAt > 2500) takeFallbackShot();
+  }, 1000);
 
   function modifiers(e) {
     var mods = 0;
@@ -181,22 +180,20 @@ VIEWER_HTML = """<!doctype html>
     lastMoveAt = now;
     mouseEvent(e, "mouseMoved");
   });
-  stage.addEventListener("mousedown", function (e) { e.preventDefault(); stage.focus(); mouseEvent(e, "mousePressed"); scheduleShot(160); });
+  stage.addEventListener("mousedown", function (e) { e.preventDefault(); stage.focus(); mouseEvent(e, "mousePressed"); });
   stage.addEventListener("mouseup", function (e) { mouseEvent(e, "mouseReleased"); });
   stage.addEventListener("wheel", function (e) {
     e.preventDefault();
     var p = mapPoint(e);
     send("Input.dispatchMouseEvent", { type: "mouseWheel", x: p.x, y: p.y,
       deltaX: e.deltaX, deltaY: e.deltaY, modifiers: modifiers(e) });
-    scheduleShot(160);
   }, { passive: false });
   window.addEventListener("keydown", function (e) {
     if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     keyEvent(e, "keyDown");
-    scheduleShot(160);
   });
   window.addEventListener("keyup", function (e) { keyEvent(e, "keyUp"); });
-  window.addEventListener("resize", function () { applyViewport(); scheduleShot(220); });
+  window.addEventListener("resize", function () { applyViewport(); });
 
   function connect() {
     try { ws = new WebSocket(wsUrl); }
@@ -206,7 +203,13 @@ VIEWER_HTML = """<!doctype html>
       send("Page.enable", {});
       send("Runtime.enable", {});
       applyViewport();
-      scheduleShot(100);
+      // Push-streamed frames: the browser sends them as fast as it renders —
+      // no request/response round trip per frame.
+      send("Page.startScreencast", {
+        format: "jpeg", quality: 62, everyNthFrame: 1,
+        maxWidth: 1600, maxHeight: 1200
+      });
+      lastFrameAt = performance.now();
     };
     ws.onmessage = function (ev) {
       var msg;
@@ -215,9 +218,11 @@ VIEWER_HTML = """<!doctype html>
         var cb = pending[msg.id];
         delete pending[msg.id];
         cb(msg.result);
+      } else if (msg.method === "Page.screencastFrame" && msg.params) {
+        if (msg.params.data) render(msg.params.data);
+        if (msg.params.sessionId) send("Page.screencastFrameAck", { sessionId: msg.params.sessionId });
       } else if (msg.method === "Page.loadEventFired") {
         applyViewport();
-        scheduleShot(120);
       }
     };
     ws.onclose = function (ev) {

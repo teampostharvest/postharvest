@@ -978,8 +978,24 @@ def _capture_worker(record: dict, timeout_seconds: float) -> None:
                 locale="en-US",
             )
             page = context.pages[0] if context.pages else context.new_page()
+
+            # Seed the capture browser with any already-saved session for this
+            # account. When the session is merely checkpoint-challenged (the
+            # usual "login from a new device" wall), the user lands directly on
+            # the "Confirm it's you" screen instead of re-typing credentials —
+            # and the checkpoint-confirmed cookies save back as a session that
+            # is trusted from this box IP. Best-effort: no saved cookies (or a
+            # failed load) simply falls back to the plain login form.
+            seed_url = "https://www.facebook.com/login/"
+            try:
+                existing = load_cookies(record["name"], owner_id=record["owner_id"])
+                if existing:
+                    context.add_cookies(existing)
+                    seed_url = "https://www.facebook.com/"
+            except Exception:  # noqa: BLE001 - seeding is best-effort
+                logger.debug("capture cookie seeding skipped", exc_info=True)
             page.goto(
-                "https://www.facebook.com/login/",
+                seed_url,
                 wait_until="domcontentloaded",
                 timeout=45000,
             )
@@ -993,8 +1009,17 @@ def _capture_worker(record: dict, timeout_seconds: float) -> None:
             # exposing the CDP port.
             _record_set(record, ready=True)
 
+            def _resolved() -> bool:
+                # A seeded (or freshly logged-in) session must clear the
+                # checkpoint first: the challenge page carries c_user+xs too,
+                # so the cookie check alone would save the walled session
+                # unchanged.
+                url = page.url
+                return "checkpoint" not in url and "login" not in url
+
             # Poll for the two cookies that define a Facebook session (c_user +
-            # xs), giving the user time to log in and solve the CAPTCHA.
+            # xs) ON a cleared page, giving the user time to log in / solve the
+            # challenge.
             deadline = time.monotonic() + timeout_seconds
             captured: list | None = None
             while time.monotonic() < deadline:
@@ -1002,7 +1027,11 @@ def _capture_worker(record: dict, timeout_seconds: float) -> None:
                     break
                 cookies = context.cookies()
                 fb = [c for c in cookies if "facebook.com" in c.get("domain", "")]
-                if any(c["name"] == "c_user" for c in fb) and any(c["name"] == "xs" for c in fb):
+                if (
+                    any(c["name"] == "c_user" for c in fb)
+                    and any(c["name"] == "xs" for c in fb)
+                    and _resolved()
+                ):
                     captured = cookies
                     break
                 time.sleep(2)
