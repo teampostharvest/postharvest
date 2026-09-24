@@ -4,7 +4,7 @@
 # One entry point for everything: Docker (dev+prod), local servers, CLI,
 # tests, lint, typecheck.
 #
-# Docker commands run from docker/ (compose project dir — see DECISIONS.md D6).
+# Docker commands run from docker/ (compose project dir — see docs/DECISIONS.md D6).
 # The root .env is for local CLI/tests; compose reads docker/.env.
 # ============================================================================
 SHELL := /bin/bash
@@ -80,6 +80,32 @@ prod-ps: ## List prod stack containers
 
 prod-health: ## Hit the prod health endpoint via nginx
 	curl -fsS http://localhost/api/health && echo
+
+
+# ============================================================================
+# Docker — monitoring platform (Prometheus + Grafana; profile "mon")
+# ============================================================================
+# Adds prometheus, grafana, redis/nginx/node_exporter + cadvisor (D13–D17).
+# Nothing publishes a port — Grafana is reached via SSH tunnel:
+#     ssh -L 3001:127.0.0.1:3001 <vps>   then  open http://localhost:3001
+
+mon-up: ## Start prod + monitoring platform (--profile prod --profile mon)
+	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile prod --profile mon up -d
+
+mon-build: ## Rebuild + start monitoring platform
+	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile prod --profile mon up -d --build
+
+mon-down: ## Stop the monitoring services (prod stack stays up)
+	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile prod --profile mon stop prometheus grafana redis_exporter nginx_exporter node_exporter cadvisor
+
+mon-ps: ## List monitoring platform containers
+	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile mon ps
+
+mon-logs: ## Follow monitoring platform logs
+	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile mon logs -f
+
+mon-restart: ## Restart monitoring containers (no rebuild)
+	cd $(PROD_DIR) && $(DOCKER) $(PROD_FLAGS) --profile mon restart
 
 
 # ============================================================================

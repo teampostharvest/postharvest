@@ -1,0 +1,247 @@
+# Grafana-managed alert rules (D17) — provisioned as code.
+#
+# Queries hit the "prometheus" datasource UID provisioned in
+# ../datasources/datasource.yml; the threshold step is a datasource-uid
+# __expr__ expression. All queries are boolean (0/1) so the threshold
+# evaluator is uniformly `gt 0`.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: PostHarvest
+    folder: PostHarvest
+    interval: 1m
+    rules:
+      - uid: ph-backend-down
+        title: Backend down
+        condition: B
+        for: 1m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'up{job="backend"} == 0'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+            relativeTimeRange:
+              from: 600
+              to: 0
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: Backend is down (up == 0 for 1m)
+
+      - uid: ph-backend-error-rate
+        title: Backend 5xx error rate spike
+        condition: B
+        for: 5m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'sum(rate(postharvest_http_requests_total{status=~"5[0-9][0-9]"}[5m])) / clamp_min(sum(rate(postharvest_http_requests_total[5m])), 0.000001) > 0.05'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+            relativeTimeRange:
+              from: 600
+              to: 0
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: Backend 5xx ratio above 5% for 5m
+
+      - uid: ph-redis-down
+        title: Redis down
+        condition: B
+        for: 1m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'up{job="redis"} == 0'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+            relativeTimeRange:
+              from: 600
+              to: 0
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: Redis is down (up == 0 for 1m)
+
+      - uid: ph-redis-memory
+        title: Redis memory pressure
+        condition: B
+        for: 5m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'redis_memory_used_bytes / clamp_min(redis_config_maxmemory, 1.0) > 0.75'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+            relativeTimeRange:
+              from: 600
+              to: 0
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: Redis used memory above 75% of maxmemory for 5m
+
+      - uid: ph-disk-pressure
+        title: Host disk pressure
+        condition: B
+        for: 5m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: '(1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) > 0.85'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+            relativeTimeRange:
+              from: 600
+              to: 0
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: Host disk usage above 85% for 5m
+
+      - uid: ph-target-down
+        title: Scrape target down
+        condition: B
+        for: 3m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'up{job!~"prometheus|backend|redis"} == 0'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+            relativeTimeRange:
+              from: 600
+              to: 0
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: A scrape target is down (up == 0 for 3m)

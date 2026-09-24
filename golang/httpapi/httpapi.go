@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	worker "postharvest/golang"
@@ -50,6 +52,66 @@ const cacheHitHeader = "X-PostHarvest-Cache"
 // Clock is an injectable wall clock so golden tests are deterministic
 // (mirrors parser.py's `now` parameter).  nil means time.Now.
 type Clock func() time.Time
+
+// Prometheus metrics for the HTTP surface (plans/monitoring.md): request
+// count by handler/status plus a handler-latency histogram, registered on
+// the default registry so the promhttp.Handler() at /metrics serves them.
+// Like every other /metrics in the stack they are never proxied by nginx
+// and never published (ADRs D15/D16).
+var (
+	requestTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "postharvest_go_requests_total",
+			Help: "HTTP requests served by the go worker, by handler and status.",
+		},
+		[]string{"handler", "status"},
+	)
+	requestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "postharvest_go_request_duration_seconds",
+			Help:    "HTTP request latency in seconds for the go worker handlers.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"handler"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(requestTotal, requestDuration)
+}
+
+// statusRecorder captures the response status for the metrics middleware
+// (handlers that never call WriteHeader leave the 200 default).
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// instrument observes request count + latency for every request the mux
+// serves, bucketing by route family so the dashboard stays stable.
+func instrument(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		handler := "other"
+		switch r.URL.Path {
+		case parsePath:
+			handler = "parse"
+		case "/healthz", "/readyz":
+			handler = "health"
+		case "/metrics":
+			handler = "metrics"
+		}
+		requestTotal.WithLabelValues(handler, strconv.Itoa(rec.status)).Inc()
+		requestDuration.WithLabelValues(handler).Observe(time.Since(started).Seconds())
+	})
+}
 
 // Outcome is one ParseRequest processed to completion: canonical 33-key
 // posts after normalize+dedup, plus isolated per-source parse failures.
@@ -149,10 +211,11 @@ func NewHandler(clock Clock, store idempotency.Store) http.Handler {
 	mux.Handle("/healthz", health)
 	mux.Handle("/readyz", health)
 	// Prometheus exposition (plans/monitoring.md): process + Go runtime
-	// metrics from the default registry. Never published outside the compose
+	// metrics from the default registry, plus the request count/latency
+	// collectors instrumented below. Never published outside the compose
 	// networks (like every other /metrics in the stack).
 	mux.Handle("/metrics", promhttp.Handler())
-	return mux
+	return instrument(mux)
 }
 
 func (s *server) handleParse(w http.ResponseWriter, r *http.Request) {

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -339,6 +340,34 @@ func TestHandlerExposesMetrics(t *testing.T) {
 	}
 	if !strings.Contains(body, "process_cpu_seconds_total") {
 		t.Fatalf("/metrics should include process metrics, got:\n%s", body)
+	}
+}
+
+func TestHandlerMetricsCountParseRequests(t *testing.T) {
+	// A real POST /v1/parse must bump the request counter labelled
+	// handler="parse", status="200" so the overview board has data.
+	h := newTestHandler()
+	body := marshalReq(t, newFixtureRequest(t))
+	if rec := postParse(t, h, body); rec.Code != http.StatusOK {
+		t.Fatalf("parse: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/metrics: status = %d, want 200", rec.Code)
+	}
+	out := rec.Body.String()
+	// Counters accumulate across the suite (default registry), so assert the
+	// series exists with value >= 1 rather than an exact total.
+	for _, pattern := range []string{
+		`postharvest_go_requests_total\{handler="parse",status="200"\} [1-9][0-9]*`,
+		`postharvest_go_request_duration_seconds_count\{handler="parse"\} [1-9][0-9]*`,
+	} {
+		if !regexp.MustCompile(pattern).MatchString(out) {
+			t.Fatalf("/metrics missing %q, got:\n%s", pattern, out)
+		}
 	}
 }
 

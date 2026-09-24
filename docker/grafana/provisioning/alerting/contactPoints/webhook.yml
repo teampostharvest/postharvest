@@ -1,0 +1,16 @@
+# Webhook contact point (D17). The URL is interpolated from
+# GRAFANA_ALERT_WEBHOOK_URL at provision time; when empty the receiver still
+# exists but cannot deliver — rules evaluate and fire in the UI, notifications
+# stay silent until a real channel URL is configured.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: Webhook
+    receivers:
+      - uid: ph-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: ${GRAFANA_ALERT_WEBHOOK_URL}
+        secureSettings: {}

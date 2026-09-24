@@ -1,0 +1,15 @@
+# Provisioned Prometheus datasource (D13). UID is fixed so dashboard JSON and
+# alert rules can reference it by name, not by server-assigned uid.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s

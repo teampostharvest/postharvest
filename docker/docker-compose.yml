@@ -47,6 +47,7 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/locations.conf:/etc/nginx/snippets/locations.conf:ro
+      - ./nginx/stub_status.conf:/etc/nginx/conf.d/stub_status.conf:ro
       - ../certs:/etc/nginx/certs:ro
       - certbot-www:/var/www/certbot:ro
       - certbot-conf:/etc/letsencrypt:ro
@@ -345,10 +346,155 @@ services:
     networks:
       - isolated
 
+# =====================================================================
+  # Monitoring platform (milestone plans/monitoring.md, ADRs D13–D17).
+  #
+  #   D13  Prometheus + Grafana OSS; dashboards + datasources provisioned
+  #        as code from docker/grafana/provisioning (files in git).
+  #   D14  Egress stays internal-only: `prometheus` joins BOTH `web` and
+  #        `isolated` so it can scrape every service; `grafana` joins `web`
+  #        only and reaches nothing but prometheus.
+  #   D15  Nothing here publishes a port. Grafana is reached via SSH tunnel
+  #        (ssh -L 3001:127.0.0.1:3001); /metrics stay unproxied by nginx.
+  #   D16  nginx stub_status is allow-restricted to the docker networks.
+  #   D17  Alerts are Grafana rules provisioned as code; the webhook URL
+  #        comes from GRAFANA_ALERT_WEBHOOK_URL (empty => rules exist but
+  #        the contact point is inert — no noise until a channel is set).
+  #
+  # Profile "mon": start the stack with
+  #     docker compose --profile prod --profile mon up -d
+  # =====================================================================
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: postharvest-prometheus
+    profiles: ["mon"]
+    restart: unless-stopped
+    init: true
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_DAYS:-30d}
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      # prometheus runtime image is busybox-based: wget is guaranteed, python
+      # is not. The landing page is a 200 when the server is up.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - web
+      - isolated
+
+  grafana:
+    image: grafana/grafana-oss:11.4.2
+    container_name: postharvest-grafana
+    profiles: ["mon"]
+    restart: unless-stopped
+    init: true
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/postharvest-overview.json
+      # Provisioned alert contact point (D17). Empty => rules still exist but
+      # notifications are inert until a real URL is configured.
+      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    # No healthcheck: nothing depends on grafana, and the OSS image does not
+    # guarantee a CLI HTTP client. Verification happens via the SSH tunnel.
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - web
+
+  redis_exporter:
+    image: prom/redis-exporter:v1.61.0
+    container_name: postharvest-redis-exporter
+    profiles: ["mon"]
+    restart: unless-stopped
+    init: true
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - isolated
+
+  nginx_exporter:
+    # 0.x lineage scrapes OSS nginx `stub_status` over HTTP (the 1.x images
+    # talk NGINX Plus gRPC only).
+    image: nginx/nginx-prometheus-exporter:0.11.0
+    container_name: postharvest-nginx-exporter
+    profiles: ["mon"]
+    restart: unless-stopped
+    init: true
+    environment:
+      SCRAPE_URI: http://nginx:18080/stub_status
+    depends_on:
+      nginx:
+        condition: service_healthy
+    networks:
+      - web
+
+  node_exporter:
+    # Host metrics: pid: host + ro binds of the host /proc, /sys and root so
+    # the exporter reads HOST state while staying a normal bridge container
+    # Prometheus can scrape (no port published — D15).
+    image: prom/node-exporter:v1.8.2
+    container_name: postharvest-node-exporter
+    profiles: ["mon"]
+    restart: unless-stopped
+    init: true
+    pid: host
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --no-collector.wifi
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - web
+
+  cadvisor:
+    # Container metrics. --port=8090 (8080 is go's on the isolated net).
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: postharvest-cadvisor
+    profiles: ["mon"]
+    restart: unless-stopped
+    init: true
+    privileged: true
+    command:
+      - --port=8090
+      - --housekeeping_interval=10s
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - web
+
 volumes:
   certbot-www:
   certbot-conf:
   redis-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   web:
