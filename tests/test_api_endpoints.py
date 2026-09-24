@@ -304,6 +304,30 @@ def test_list_jobs_pagination(authed_client):
     assert len(resp2.json()["items"]) == 1
 
 
+def test_list_jobs_status_filter(authed_client):
+    running = insert_completed_job(sample_posts(1), status="running")
+    insert_completed_job(sample_posts(1), status="completed")
+
+    resp = authed_client.get("/api/jobs?status=running")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert [item["job_id"] for item in body["items"]] == [running]
+
+
+def test_list_jobs_status_filter_multi_and_invalid(authed_client):
+    insert_completed_job(sample_posts(1), status="queued")
+    insert_completed_job(sample_posts(1), status="completed")
+
+    resp = authed_client.get("/api/jobs?status=queued,running")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+    bad = authed_client.get("/api/jobs?status=bogus")
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "invalid_input"
+
+
 def test_list_accounts_empty_and_404_delete(authed_client, client):
     resp = client.get("/api/accounts")  # unauthenticated -> 401
     assert resp.status_code == 401

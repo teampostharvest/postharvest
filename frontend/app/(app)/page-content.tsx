@@ -2,7 +2,9 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { HomeView } from "@/components/home-view";
+import { HomeView } from "@/components/views/HomeView";
+import { DashboardView } from "@/components/views/DashboardView";
+import { useAuth } from "@/lib/auth-context";
 
 const HOW_IT_WORKS: ReadonlyArray<{ title: string; body: string }> = [
   {
@@ -27,14 +29,14 @@ function HowItWorks() {
   return (
     <section className="mx-auto w-full max-w-5xl px-8" aria-label="How it works">
       <div className="pb-8 pt-10">
-        <p className="font-sans font-light text-[10px] uppercase tracking-widest text-neutral-400">How it works</p>
+        <p className="text-xs font-medium text-ink-muted">How it works</p>
         <ol className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
           {HOW_IT_WORKS.map((step, index) => (
             <li key={step.title}>
-              <p className="font-sans font-light text-[10px] tracking-widest text-neutral-600">
+              <p className="text-xs font-medium text-ink-muted">
                 Step {index + 1}: {step.title}
               </p>
-              <p className="mt-2 font-sans text-sm font-light leading-relaxed text-neutral-600">{step.body}</p>
+              <p className="mt-2 text-sm leading-relaxed text-ink-muted">{step.body}</p>
             </li>
           ))}
         </ol>
@@ -45,9 +47,17 @@ function HowItWorks() {
 
 export default function HomePage() {
   const router = useRouter();
+  const { user } = useAuth();
 
   const handleTrace = useCallback(
     (url: string) => {
+      // Stash the target so a sign-in wall doesn't discard it: after auth
+      // the sign-in screen redirects straight back to this investigation.
+      try {
+        window.sessionStorage.setItem("postharvest.pending-target", url);
+      } catch {
+        // Storage unavailable — the run still starts for signed-in users.
+      }
       router.push(`/investigation?url=${encodeURIComponent(url)}`);
     },
     [router],
@@ -57,8 +67,18 @@ export default function HomePage() {
     router.push("/investigation");
   }, [router]);
 
+  // Authenticated users get the operations dashboard; signed-out
+  // visitors get the marketing hero. The shell already gates the rest.
+  if (user) {
+    return (
+      <div className="w-full">
+        <DashboardView />
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full animate-fade-in-up">
+    <div className="w-full">
       <HomeView onTrace={handleTrace} onAdvanced={handleAdvanced} />
       <HowItWorks />
     </div>

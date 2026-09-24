@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from backend.core.config import get_settings
@@ -35,6 +35,134 @@ logger = logging.getLogger("db")
 
 class Base(DeclarativeBase):
     """Declarative base shared by all ORM models."""
+
+
+def is_transaction_pooler(url: str) -> bool:
+    """True when ``url`` points at Supabase's transaction-mode pooler.
+
+    Supabase exposes its Supavisor pooler in two modes on the same host:
+    session mode on 5432 and **transaction** mode on 6543. Port 6543 is the
+    unambiguous marker — direct and session connections both use 5432.
+    """
+    try:
+        return make_url(url).port == 6543
+    except Exception:  # noqa: BLE001 - malformed URL falls back to session mode
+        return False
+
+
+def session_url_for_migrations(url: str) -> str:
+    """Point migrations at a session connection when the app uses the pooler.
+
+    The application DSN may target Supabase's transaction pooler (port 6543),
+    but migrations are DDL + multi-statement transactions that need a stable
+    backend session — running them through transaction pooling is unsafe.
+    Swap to the session pooler (5432) for the migration run only.
+    """
+    try:
+        parsed = make_url(url)
+    except Exception:  # noqa: BLE001 - leave the DSN untouched if unparsable
+        return url
+    if parsed.port == 6543:
+        return parsed.set(port=5432).render_as_string(hide_password=False)
+    return url
+
+
+# Supavisor's server-side pool (``default_pool_size`` on Supabase's shared
+# pooler) is the real concurrency ceiling for the transaction pooler. Every
+# process using the DSN draws from the SAME server connections, so the SUM of
+# all client pools must stay below it — past that, bursts do not queue
+# client-side, they fail with ``ECHECKOUTTIMEOUT: unable to check out
+# connection`` (measured: 20 concurrent queries -> 4 hard errors).
+_POOLER_SERVER_POOL = 15
+# Left for the host CLI and the one-off Alembic migration run.
+_POOLER_RESERVED = 2
+_POOLER_BUDGET = _POOLER_SERVER_POOL - _POOLER_RESERVED  # 13
+
+# Client-pool splits of that budget, as (pool_size, max_overflow).
+_POOL_TRANSACTION_INLINE = (9, 4)  # one process owns the whole budget
+# The API keeps the larger share: it serves the dashboard's concurrent polls
+# (usage + active jobs + accounts) and every request used to need a connection
+# just to resolve the caller. The worker runs one scrape at a time and needs
+# only enough for its progress pings and post writes.
+_POOL_TRANSACTION_API_WITH_WORKER = (8, 2)  # 10
+_POOL_TRANSACTION_WORKER = (2, 1)  # 10 + 3 == 13, within budget
+
+
+def transaction_pool_sizes() -> tuple[int, int]:
+    """Client-pool size for this process under the shared pooler budget.
+
+    With ``inline`` execution one process (the API) uses the whole budget.
+    With an arq worker two processes share the pooler, so the API shrinks and
+    the worker takes a small pool — their **sum** stays within budget, which is
+    what keeps a burst from oversubscribing Supavisor's server pool.
+    """
+    settings = get_settings()
+    role = getattr(settings, "process_role", "api")
+    if role == "worker":
+        return _POOL_TRANSACTION_WORKER
+    if getattr(settings, "job_execution", "inline") == "arq":
+        return _POOL_TRANSACTION_API_WITH_WORKER
+    return _POOL_TRANSACTION_INLINE
+
+
+def postgres_pool_kwargs(url: str) -> dict:
+    """Connection-pool guardrails for PostgreSQL (Supabase pooler).
+
+    Two pooler modes are supported, chosen from the DSN port:
+
+    * **Transaction pooler (6543)** — Supavisor multiplexes many client
+      connections onto a small number of server connections, so the 15-session
+      ceiling that wedged the API on the session pooler no longer applies. The
+      client pool is sized from the process's role (see
+      :func:`transaction_pool_sizes`) so that when an arq worker shares the
+      pooler the **sum** of both client pools still fits its server pool.
+      Server-side prepared statements are unusable, though: the backend
+      connection can change between statements, so ``prepare_threshold=None``
+      disables them (psycopg3). This is the plan's §7 "PgBouncer in transaction
+      mode" prerequisite, satisfied by Supabase's managed pooler instead of a
+      self-hosted PgBouncer.
+
+    * **Session/direct (5432)** — the original conservative pool. The shared
+      session pooler caps at 15 clients TOTAL across every backend, so this
+      stays small (3 pooled + 2 overflow = 5) and every wait is bounded: pool
+      checkout fails after 10 s, TCP connects after 5 s. Without both bounds a
+      saturated pooler wedged the whole API — uvicorn threads piled up behind
+      unbounded checkouts until even /api/health stopped responding.
+    """
+    # Bound the wait we actually control: ``connect_timeout`` is client-side
+    # and enforced. The ``statement_timeout`` startup option is best-effort —
+    # Supavisor ignores it (both pooler modes report the server's 2 min
+    # default), so a wedged statement is not killed by this. It is harmless to
+    # pass and takes effect on a direct (non-pooler) connection.
+    connect_args = {
+        "connect_timeout": 5,
+        "options": "-c statement_timeout=15000",
+    }
+
+    if is_transaction_pooler(url):
+        connect_args["prepare_threshold"] = None
+        pool_size, max_overflow = transaction_pool_sizes()
+        # The client pool must stay BELOW Supavisor's server-side pool; keeping
+        # the pooler's total budget intact across every process sharing the DSN
+        # turns any burst beyond it into a bounded local wait instead of an
+        # ``ECHECKOUTTIMEOUT`` error.
+        return {
+            "pool_size": pool_size,
+            "max_overflow": max_overflow,
+            "pool_timeout": 10,
+            # Supavisor keeps the client connection alive; recycle rarely.
+            "pool_recycle": 1800,
+            "pool_use_lifo": True,
+            "connect_args": connect_args,
+        }
+
+    return {
+        "pool_size": 3,
+        "max_overflow": 2,
+        "pool_timeout": 10,
+        "pool_recycle": 300,
+        "connect_args": connect_args,
+    }
 
 
 def _build_engine() -> Engine:
@@ -57,7 +185,7 @@ def _build_engine() -> Engine:
             if raw_path:
                 Path(raw_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     elif url.startswith("postgresql"):
-        kwargs.update({"pool_size": 10, "max_overflow": 20})
+        kwargs.update(postgres_pool_kwargs(url))
     elif url.startswith("mysql"):
         kwargs.update({"pool_size": 10, "max_overflow": 20})
 

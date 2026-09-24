@@ -284,7 +284,7 @@ file. In Docker, set them in `docker/.env`; on the host, in the root `.env`.
 | `DATA_DIR` | `./data` | Runtime data directory |
 | `EXPORT_BASE_DIR` | `./data/exports` | Export output root |
 | `WORKER_THREADS` | `4` | Parallel scrape workers |
-| `MAX_URLS_PER_JOB` | `100` | Max URLs per request |
+| `MAX_URLS_PER_JOB` | `300` | Max URLs per request (global cap above plan ceilings) |
 | `DEFAULT_MAX_POSTS` | *(none)* | Per-source post cap |
 | `DEFAULT_POST_TYPE` | `all` | Default type filter |
 | `DEBUG` | `false` | Verbose logging |

@@ -6,7 +6,27 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, isTerminalStatus } from "./api";
-import type { JobProgress, Post } from "./types";
+import type { AccountsResponse, JobProgress, JobSummary, Post, UsageResponse } from "./types";
+
+/**
+ * Background tabs must not keep polling. A hidden tab still pins a Postgres
+ * connection server-side for the life of each request, and a handful of idle
+ * tabs are enough to starve the backend's pool. Pollers skip work while hidden
+ * and refresh immediately when the tab becomes visible again.
+ */
+function shouldPoll(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
+/** Subscribe to tab-visibility changes; invokes `cb` when the tab becomes visible. */
+function onBecomeVisible(cb: () => void): () => void {
+  if (typeof document === "undefined") return () => {};
+  const handler = (): void => {
+    if (document.visibilityState === "visible") cb();
+  };
+  document.addEventListener("visibilitychange", handler);
+  return () => document.removeEventListener("visibilitychange", handler);
+}
 
 export interface JobProgressState {
   job: JobProgress | null;
@@ -41,6 +61,13 @@ export function useJobProgress(jobId: string | null, options: { pollMs?: number 
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async (): Promise<void> => {
+      // Hidden tab: don't touch the API, just wait for the next interval.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
       try {
         const next = await api.getJob(jobId);
         if (cancelled) return;
@@ -59,16 +86,82 @@ export function useJobProgress(jobId: string | null, options: { pollMs?: number 
       }
     };
 
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
     void tick();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      detach();
     };
   }, [jobId, pollMs, attempt]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 
   return { job, error, retry };
+}
+
+export interface UsageState {
+  usage: UsageResponse | null;
+  /** Last failure (null while healthy). Polling continues so recovery is automatic. */
+  error: ApiError | null;
+  reload: () => void;
+}
+
+function useUsageFetch(enabled: boolean, pollMs: number): UsageState {
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setUsage(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const tick = async (): Promise<void> => {
+      // Hidden tab: skip the API round-trip, keep the last snapshot.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
+      try {
+        const next = await api.getUsage();
+        if (cancelled) return;
+        setUsage(next);
+        setError(null);
+      } catch (err) {
+        // 401/5xx/network/timeout — keep the last good snapshot (or nothing)
+        // but surface the failure so panels offer a retry instead of a
+        // permanent loader.
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err : new ApiError({ code: "network_error", message: "Failed to reach the API." }));
+      }
+      timer = setTimeout(() => {
+        void tick();
+      }, pollMs);
+    };
+
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      detach();
+    };
+  }, [enabled, pollMs, attempt]);
+
+  return { usage, error, reload: useCallback(() => setAttempt((value) => value + 1), []) };
 }
 
 export interface JobPostsState {
@@ -79,6 +172,141 @@ export interface JobPostsState {
   error: ApiError | null;
   loaded: boolean;
   reload: () => void;
+}
+
+/**
+ * Polls GET /api/usage for the sidebar quota panel. Pass `enabled=false`
+ * (e.g. signed-out) to skip fetching entirely.
+ */
+export function useUsage(options: { pollMs?: number; enabled?: boolean } = {}): UsageState {
+  const { pollMs = 30000, enabled = true } = options;
+  return useUsageFetch(enabled, pollMs);
+}
+
+export interface ActiveJobsState {
+  jobs: JobSummary[];
+  error: ApiError | null;
+  reload: () => void;
+}
+
+/**
+ * Polls the active (queued + running) jobs for the ops panel. Server-side
+ * status filter keeps the payload small; failures keep the last snapshot
+ * while surfacing the error for a retry affordance.
+ */
+export function useActiveJobs(options: { pollMs?: number; enabled?: boolean } = {}): ActiveJobsState {
+  const { pollMs = 10000, enabled = true } = options;
+  const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setJobs([]);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const tick = async (): Promise<void> => {
+      // Hidden tab: skip the API round-trip, keep the last snapshot.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
+      try {
+        const next = await api.listJobs({ status: "queued,running", page: 1, page_size: 25 });
+        if (cancelled) return;
+        setJobs(next.items);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err : new ApiError({ code: "network_error", message: "Failed to reach the API." }));
+      }
+      timer = setTimeout(() => {
+        void tick();
+      }, pollMs);
+    };
+
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      detach();
+    };
+  }, [enabled, pollMs, attempt]);
+
+  return { jobs, error, reload: useCallback(() => setAttempt((value) => value + 1), []) };
+}
+
+export interface AccountsState {
+  accounts: AccountsResponse | null;
+  error: ApiError | null;
+  reload: () => void;
+}
+
+/**
+ * Polls GET /api/accounts for the ops-panel quick view. Failures keep the
+ * last snapshot while surfacing the error for a retry affordance;
+ * management (add/remove) stays on the Saved accounts page.
+ */
+export function useAccounts(options: { pollMs?: number; enabled?: boolean } = {}): AccountsState {
+  const { pollMs = 60000, enabled = true } = options;
+  const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setAccounts(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const tick = async (): Promise<void> => {
+      // Hidden tab: skip the API round-trip, keep the last snapshot.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
+      try {
+        const next = await api.listAccounts();
+        if (cancelled) return;
+        setAccounts(next);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err : new ApiError({ code: "network_error", message: "Failed to reach the API." }));
+      }
+      timer = setTimeout(() => {
+        void tick();
+      }, pollMs);
+    };
+
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      detach();
+    };
+  }, [enabled, pollMs, attempt]);
+
+  return { accounts, error, reload: useCallback(() => setAttempt((value) => value + 1), []) };
 }
 
 /**

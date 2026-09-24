@@ -4,9 +4,10 @@ Responsibilities
 ----------------
 * ``start_scrape_job`` — validate submitted URLs with the scraper's
   ``validate_facebook_url``, persist the job + sources + validation errors,
-  and hand the job to the background :class:`JobManager` so POST /api/scrape
+  and hand the job to the background :func:`get_job_queue` so POST /api/scrape
   returns immediately with ``{"job_id", "status": "queued"}``.
-* ``run_scrape_job`` — worker entry point (executes in a pool thread):
+* ``run_scrape_job`` — worker entry point (executes on the configured job
+  queue: an inline pool thread, or a separate arq worker):
   queued -> running -> completed/failed; one source never fails the whole job;
   per-source progress is persisted to the DB so GET /api/jobs/{id} reflects
   live counters; cancellation is honoured between sources and via the
@@ -46,7 +47,9 @@ from sqlalchemy.exc import IntegrityError
 from backend.core.config import get_settings
 from backend.core.database import SessionLocal
 from backend.core.exceptions import AppError, InvalidInputError
-from backend.core.job_manager import CancelToken, JobManager
+from backend.core import cache, job_state
+from backend.core.job_manager import CancelToken
+from backend.core.job_queue import get_job_queue
 from backend.core.logging import get_logger
 from backend.models.engagement_metrics import EngagementMetric
 from backend.models.errors import ScrapeError
@@ -58,9 +61,6 @@ from backend.services import crawl_state_service
 from backend.schemas.scrape import ScrapeRequest
 
 logger = get_logger("services.job_service")
-
-# Process-wide background runner.
-job_manager = JobManager.get()
 
 # Scraper exception class name -> persisted error code. Kept as a plain name
 # mapping so the core app never hard-depends on the scraper's errors module.
@@ -243,8 +243,9 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
             f"Too many URLs: {len(request.urls)} (max {settings.max_urls_per_job})"
         )
 
-    # Tier limits (Basic / Pro / Enterprise) — enforced server-side, on top
-    # of the global hard caps above. Unauthenticated/CLI jobs pass through.
+    # Tier limits (Basic / Pro / Team / Enterprise) — enforced server-side,
+    # on top of the global hard caps above. Unauthenticated/CLI jobs pass
+    # through.
     if owner_id is not None:
         from backend.core.plans import plan_limits
         from backend.models.user import User
@@ -252,7 +253,8 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
         user = db.get(User, owner_id)
         if user is not None:
             limits = plan_limits(user.plan)
-            if len(request.urls) > limits["urls"]:
+            url_cap = limits["urls"]
+            if url_cap is not None and len(request.urls) > url_cap:
                 raise AppError(
                     f"Your {user.plan} plan allows up to {limits['urls']} "
                     "URL(s) per job",
@@ -352,7 +354,9 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
     db.commit()
     db.refresh(job)
 
-    job_manager.submit(job_id, run_scrape_job)
+    get_job_queue().submit(job_id, run_scrape_job)
+    job_state.set_status(job_id, "queued")  # Redis mirror (finalplanv2 §8b)
+    cache.invalidate_usage(owner_id)  # quota readout changed (active jobs +1)
     logger.info(
         "Job %s queued: %d source(s) valid (%s), %d invalid URL(s)",
         job_id,
@@ -369,8 +373,8 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
 
 
 def run_scrape_job(job_id: str) -> None:
-    """Worker entry point (runs inside a JobManager pool thread)."""
-    token = job_manager.token(job_id)
+    """Worker entry point (runs on the configured job queue)."""
+    token = get_job_queue().token(job_id)
     try:
         _run_job_inner(job_id, token)
     except AppError as exc:
@@ -396,6 +400,7 @@ def _run_job_inner(job_id: str, token: CancelToken | None) -> None:
         options_snapshot: dict = job.options or {}
         owner_id: int | None = job.owner_id
         db.commit()
+    job_state.set_status(job_id, "running")  # Redis mirror (finalplanv2 §8b)
 
     with SessionLocal() as db:
         source_ids = list(
@@ -508,6 +513,9 @@ def _process_source(
                 options,
                 _make_progress_callback(job_id, source_id),
                 token.event if token else None,
+                # §8(c): go's idempotency guard keys on job:source so a
+                # retried Parse RPC is served from go's cache, not recomputed.
+                idempotency_key=f"{job_id}:{source_id}",
             )
     except Exception as exc:  # noqa: BLE001 - typed scraper errors map to codes
         if isinstance(exc, AppError):
@@ -595,6 +603,7 @@ def _finalize(job_id: str, token: CancelToken | None) -> None:
         if job is None:
             return
 
+        owner_id = job.owner_id
         cancelled = (token is not None and token.cancelled) or bool(
             job.cancel_requested
         )
@@ -646,6 +655,10 @@ def _finalize(job_id: str, token: CancelToken | None) -> None:
         job.completed_at = _now()
         job.updated_at = _now()
         db.commit()
+    # Redis mirror for the terminal status (finalplanv2 §8b). The mirror key
+    # stays put so replicas can read a terminal job without hitting the DB.
+    job_state.set_status(job_id, "failed" if cancelled else "completed")
+    cache.invalidate_usage(owner_id)  # quota readout changed (job terminal)
 
 
 def _finalize_failure(job_id: str, code: str, message: str) -> None:
@@ -653,6 +666,7 @@ def _finalize_failure(job_id: str, code: str, message: str) -> None:
         job = db.get(ScrapeJob, job_id)
         if job is None:
             return
+        owner_id = job.owner_id
         job.status = "failed"
         job.errors_count += 1
         job.completed_at = _now()
@@ -661,6 +675,93 @@ def _finalize_failure(job_id: str, code: str, message: str) -> None:
             ScrapeError(job_id=job_id, source_url="", code=code, message=message)
         )
         db.commit()
+    job_state.set_status(job_id, "failed")  # Redis mirror (finalplanv2 §8b)
+    cache.invalidate_usage(owner_id)  # quota readout changed (job terminal)
+
+
+# ---------------------------------------------------------------------------
+# Boot-time sweep (ROADMAP job-state hygiene)
+# ---------------------------------------------------------------------------
+
+RESTART_SUSPENDED_CODE = "suspended_by_restart"
+RESTART_SUSPENDED_MESSAGE = (
+    "Job did not finish before the server restarted; "
+    "no worker exists for it anymore. Re-submit to run it again."
+)
+
+
+def sweep_orphaned_jobs() -> dict:
+    """Reconcile job rows with the (empty) in-process worker pool on boot.
+
+    Worker state lives in :class:`JobManager` threads, so after any restart:
+
+    * ``running`` jobs/sources have no worker and can never finish — mark
+      them ``failed`` with a ``suspended_by_restart`` error row. Their quota
+      slots release as a consequence (the concurrency cap counts
+      queued+running only).
+    * ``queued`` jobs never started — re-submit their workers so they run.
+    * ``paused`` jobs are user intent — leave them; ``POST /resume`` restarts
+      them on demand.
+
+    Returns ``{"failed": [...], "resumed": [...]}`` job ids. Never raises:
+    callers run this before serving traffic, and a sweep failure must not
+    block boot (it is retried on the next boot).
+    """
+    failed: list[str] = []
+    resumed: list[str] = []
+    try:
+        with SessionLocal() as db:
+            orphaned = db.scalars(
+                select(ScrapeJob).where(ScrapeJob.status == "running")
+            ).all()
+            for job in orphaned:
+                job.status = "failed"
+                job.errors_count += 1
+                job.completed_at = _now()
+                job.updated_at = _now()
+                db.add(
+                    ScrapeError(
+                        job_id=job.id,
+                        source_url="",
+                        code=RESTART_SUSPENDED_CODE,
+                        message=RESTART_SUSPENDED_MESSAGE,
+                    )
+                )
+                failed.append(job.id)
+                db.execute(
+                    ScrapeSource.__table__.update()
+                    .where(
+                        ScrapeSource.job_id == job.id,
+                        ScrapeSource.status == "running",
+                    )
+                    .values(status="failed")
+                )
+                # No worker exists for these rows anymore: drop any lingering
+                # Redis job-state keys so a later replica never reads stale
+                # "running" state for a job that can not progress (§8b).
+                job_state.delete_state(job.id)
+            queued = db.scalars(
+                select(ScrapeJob.id).where(ScrapeJob.status == "queued")
+            ).all()
+            resumed.extend(str(job_id) for job_id in queued)
+            db.commit()
+    except Exception:  # noqa: BLE001 - sweep must never block boot
+        logger.exception("Startup sweep failed; will retry on next boot")
+        return {"failed": [], "resumed": []}
+
+    queue = get_job_queue()
+    for job_id in resumed:
+        try:
+            queue.submit(job_id, run_scrape_job)
+        except Exception:  # noqa: BLE001 - one bad job must not stop the sweep
+            logger.exception("Startup sweep could not resume job %s", job_id)
+    if failed or resumed:
+        logger.info(
+            "Startup sweep: %d orphaned job(s) failed, %d queued job(s) resumed",
+            len(failed),
+            len(resumed),
+        )
+    return {"failed": failed, "resumed": resumed}
 
 
 # ---------------------------------------------------------------------------
@@ -1032,3 +1133,7 @@ def _persist_progress(job_id: str, source_id: int, counters: dict) -> None:
             db.commit()
     except Exception:  # noqa: BLE001 - never crash the worker over progress
         logger.debug("Progress persistence failed for job %s", job_id, exc_info=True)
+        return
+    # Redis mirror: same live counters, so any replica can render progress
+    # without touching Postgres (finalplanv2 §8b).
+    job_state.set_progress(job_id, counters)

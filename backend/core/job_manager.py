@@ -7,6 +7,14 @@ in a pool thread so ``POST /api/scrape`` returns immediately.
 
 Job state is persisted in the database by the worker; this module is purely
 the scheduler/cancellation plumbing.
+
+Redis coordination (finalplanv2 §8(b)/§11 Phase 1)
+---------------------------------------------------
+Cancellation signals are mirrored to Redis (``job:{job_id}:cancel``) as well
+as the in-process event, so a cancel issued from any replica/process is seen
+by the worker that owns the job — the Phase 1 prerequisite for running more
+than one backend replica. When Redis is unavailable the token degrades to the
+plain in-process event (pre-Redis behaviour); it never blocks or raises.
 """
 from __future__ import annotations
 
@@ -14,6 +22,7 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable
 
+from backend.core import job_state
 from backend.core.config import get_settings
 from backend.core.logging import get_logger
 
@@ -35,12 +44,24 @@ class CancelToken:
 
     @property
     def cancelled(self) -> bool:
-        """True once cancellation has been requested."""
-        return self._event.is_set()
+        """True once cancellation has been requested.
+
+        Checks the in-process event first, then the Redis mirror so a cancel
+        requested by another replica/process is honoured. Folding the Redis
+        result into the event keeps any ``event.wait(...)`` caller unblocked
+        too.
+        """
+        if self._event.is_set():
+            return True
+        if job_state.is_cancelled(self.job_id):
+            self._event.set()
+            return True
+        return False
 
     def request_cancel(self) -> None:
-        """Flip the cancellation flag (thread-safe)."""
+        """Flip the cancellation flag (thread-safe) and mirror it to Redis."""
         self._event.set()
+        job_state.request_cancel(self.job_id)
 
 
 class JobManager:
@@ -89,12 +110,16 @@ class JobManager:
     def cancel(self, job_id: str, wait_seconds: float | None = None) -> bool:
         """Request cancellation and wait up to ``wait_seconds`` for the worker.
 
-        Returns True when the worker stopped within the window (or was already
-        done / unknown). Best-effort by design: the DELETE route proceeds with
-        the row deletion afterwards regardless.
+        The cancel signal is mirrored to Redis *before* the wait, so a worker
+        owning the job in any process/replica observes it even when no local
+        token exists here. Returns True when the worker stopped within the
+        window (or was already done / unknown). Best-effort by design: the
+        DELETE route proceeds with the row deletion afterwards regardless.
         """
         if wait_seconds is None:
             wait_seconds = get_settings().cancel_wait_seconds
+        # Mirrored first — must land even if `token` is None below.
+        job_state.request_cancel(job_id)
         token = self.token(job_id)
         if token is None:
             return True

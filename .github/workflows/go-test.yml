@@ -1,0 +1,35 @@
+name: go-test
+
+on:
+  push:
+    branches: [master, next, testing]
+  pull_request:
+    branches: [master, next, testing]
+
+jobs:
+  test:
+    name: Go worker (offline, vendored)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: golang
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: golang/go.mod
+          cache-dependency-path: golang/go.sum
+
+      # Mirrors `make test-go`: the vendor/ tree is committed, so the suite
+      # runs fully offline — GOPROXY=off is the point, not an accident.  A
+      # green CI run proves no go-get snuck in and the goldens still hold.
+      - name: gofmt
+        run: test -z "$(gofmt -l . | grep -v '^vendor/')"
+
+      - name: Go tests (GOPROXY=off)
+        run: GOPROXY=off go test -count=1 ./...

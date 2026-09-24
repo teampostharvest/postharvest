@@ -3,39 +3,21 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ApiErrorBanner } from "@/components/api-error-banner";
-import { ExportArea } from "@/components/export-area";
-import { KpiCards } from "@/components/kpi-cards";
-import { PostDetailDrawer } from "@/components/post-detail-drawer";
-import { PostsTable } from "@/components/posts-table";
-import { ProgressSection } from "@/components/progress-section";
-import { UrlInputCard } from "@/components/url-input-card";
+import { ApiErrorBanner } from "@/components/features/scraper/ApiErrorBanner";
+import { ExportArea } from "@/components/features/posts/ExportArea";
+import { KpiCards } from "@/components/features/metrics/KpiCards";
+import { PostDetailDrawer } from "@/components/features/posts/PostDetailDrawer";
+import { PostsTable } from "@/components/features/posts/PostsTable";
+import { ProgressSection } from "@/components/features/scraper/ProgressSection";
+import { UrlInputCard } from "@/components/features/scraper/UrlInputCard";
 import { ApiError, api, isTerminalStatus } from "@/lib/api";
 import { useJobPosts, useJobProgress } from "@/lib/hooks";
 import type { Post, ScrapeRequest } from "@/lib/types";
 
 const POLL_INTERVAL_MS = 1500;
 
-const DOT_STEP_MS = 400;
-const DOT_MAX = 4;
-
 function ScraperRunningHeading() {
-  const [dots, setDots] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setDots((d) => (d >= DOT_MAX ? 0 : d + 1));
-    }, DOT_STEP_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  return (
-    <span className="font-mono tabular-nums">
-      Scraper Running
-      {".".repeat(dots)}
-      <span className="invisible aria-hidden" aria-hidden="true">{`${"=".repeat(DOT_MAX)}`}</span>
-    </span>
-  );
+  return <span>Scraper running</span>;
 }
 
 export default function InvestigationPage() {
@@ -68,8 +50,11 @@ function InvestigationContent() {
   const { job, error: pollError, retry: retryPoll } = useJobProgress(jobId, { pollMs: POLL_INTERVAL_MS });
   const postsState = useJobPosts(job && isTerminalStatus(job.status) ? jobId : null);
 
-  const jobActive = jobId !== null && job !== null && !isTerminalStatus(job.status) ? true : jobId !== null && job === null;
+  const jobActive = jobId !== null && job !== null && !isTerminalStatus(job.status);
   const jobTerminal = job !== null && isTerminalStatus(job.status);
+  // Deep link (?job=) while the status is still loading: neither running
+  // nor finished — hold the idle headline instead of flashing "running".
+  const jobLoading = jobId !== null && job === null;
 
   // Scroll to results once the job finishes.
   useEffect(() => {
@@ -110,7 +95,7 @@ function InvestigationContent() {
 
   return (
     <>
-      <div className="mx-auto w-full max-w-5xl px-8 pb-20 animate-fade-in-up">
+      <div className="mx-auto w-full max-w-5xl px-8 pb-20">
         <AnimatePresence mode="wait" initial={false}>
           {jobActive ? (
             <motion.h1
@@ -119,7 +104,7 @@ function InvestigationContent() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              className="mb-8 pt-6 font-sans text-4xl font-semibold tracking-tighter text-black"
+              className="mb-8 pt-6 font-display text-2xl font-semibold tracking-tight text-ink"
             >
               <ScraperRunningHeading />
             </motion.h1>
@@ -130,7 +115,7 @@ function InvestigationContent() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              className="mb-8 pt-6 font-sans text-4xl font-semibold tracking-tighter text-black"
+              className="mb-8 pt-6 font-display text-2xl font-semibold tracking-tight text-ink"
             >
               {job?.status === "failed" ? "Results (partial)" : "Results"}
             </motion.h1>
@@ -141,7 +126,7 @@ function InvestigationContent() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              className="mb-8 pt-6 font-sans text-4xl font-semibold tracking-tighter text-black"
+              className="mb-8 pt-6 font-display text-2xl font-semibold tracking-tight text-ink"
             >
               Target, configure, run.
             </motion.h1>
@@ -179,16 +164,22 @@ function InvestigationContent() {
         ) : null}
 
         {jobId && !jobTerminal ? (
-          <div className="mt-10 border-t border-neutral-200 pt-8">
-            <ProgressSection active={jobActive} job={job} error={pollError} onRetry={retryPoll} />
+          <div className="mt-10 border-t border-border pt-8">
+            <ProgressSection active={jobActive || jobLoading} job={job} error={pollError} onRetry={retryPoll} />
           </div>
         ) : null}
 
         {jobTerminal ? (
-          <div ref={resultsRef} className="mt-10 scroll-mt-24 space-y-6 border-t border-neutral-200 pt-8" aria-live="polite">
-            <p className="max-w-lg truncate font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-              Job <code className="border border-border px-1.5 py-0.5">{jobId}</code>
-              {job?.pages_total != null ? ` · ${job.pages_total} page${job.pages_total === 1 ? "" : "s"}` : ""}
+          <div ref={resultsRef} className="mt-10 scroll-mt-24 space-y-6 border-t border-border pt-8" aria-live="polite">
+            <p className="flex flex-wrap items-center gap-2 text-xs font-medium text-ink-muted">
+              <span className="truncate">
+                Job <code className="border border-border px-1.5 py-0.5 font-mono">{jobId}</code>
+              </span>
+              {job?.pages_total != null ? (
+                <span className="rounded-full bg-bg-subtle px-2 py-0.5 font-mono text-xs tabular-nums">
+                  {job.pages_total} page{job.pages_total === 1 ? "" : "s"}
+                </span>
+              ) : null}
             </p>
 
             <KpiCards

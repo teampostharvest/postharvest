@@ -44,9 +44,39 @@ _SESSION_TMP = Path(tempfile.mkdtemp(prefix="fbscraper_tests_"))
 _SESSION_TMP.mkdir(parents=True, exist_ok=True)
 
 os.environ["DATABASE_URL"] = "sqlite:///" + (_SESSION_TMP / "test.db").as_posix()
+# Neutralize production-ish settings from root `.env` (loaded by pydantic
+# settings via config.py). The suite's assertions assume the code defaults:
+# * SUPABASE_DB_URL   — database.py prefers it over DATABASE_URL; without
+#   this the suite runs against the REAL Supabase instance (slow round-trips,
+#   pool contention with production, flaky plan/job timeouts).
+# * MAX_URLS_PER_JOB  — root `.env` sets 100, but plan-cap tests assume the
+#   code default of 300 (enterprise sends 200 URLs, team ceiling is 150).
+# * COOKIE_ENCRYPTION_KEY — enables at-rest Fernet encryption of personal
+#   cookies; mirror tests assert the plaintext jar.
+# CI is exempt only because it has no `.env` file.
+os.environ["SUPABASE_DB_URL"] = ""
+os.environ["MAX_URLS_PER_JOB"] = "300"
+os.environ["COOKIE_ENCRYPTION_KEY"] = ""
 os.environ["EXPORT_BASE_DIR"] = str(_SESSION_TMP / "exports")
 os.environ["DATA_DIR"] = str(_SESSION_TMP / "data")
 os.environ["CANCEL_WAIT_SECONDS"] = "2"  # keep DELETE/cancellation tests fast
+# Neutralize the node fetch seam from root `.env` (as above): the seam
+# hygiene tests assert `use_node`/`use_node_browser` are OFF by default and
+# that `node_base_url` is the code default, so the local `.env` (which may
+# hold live development values) must not leak into the suite.
+os.environ["USE_NODE"] = "0"
+os.environ["USE_NODE_BROWSER"] = "0"
+os.environ["NODE_BASE_URL"] = "http://127.0.0.1:9334"
+# Neutralize the go compute seam from root `.env` for the same reason: the
+# seam hygiene tests assert `use_go_worker` is OFF by default and that
+# `go_worker_base_url` is the code default.
+os.environ["USE_GO_WORKER"] = "0"
+os.environ["GO_WORKER_BASE_URL"] = "http://127.0.0.1:8080"
+# REDIS_URL — job-state mirrors degrade to DB-only when empty, which is
+# exactly the pre-Redis behaviour the hermetic suite assumes (no network,
+# no Redis daemon). The Redis-backed path is covered by dedicated fakeredis
+# tests in tests/test_job_state_redis.py.
+os.environ["REDIS_URL"] = ""
 
 import pytest  # noqa: E402
 
@@ -60,7 +90,43 @@ def _check_environment() -> None:
 
     s = get_settings()
     assert _SESSION_TMP.as_posix() in s.database_url, "DATABASE_URL did not take effect"
+    assert not s.supabase_db_url, (
+        "SUPABASE_DB_URL leaked from root .env into the test process; "
+        "tests would hit the production database"
+    )
+    assert s.max_urls_per_job == 300, (
+        f"MAX_URLS_PER_JOB leaked from root .env (got {s.max_urls_per_job}); "
+        "plan-cap tests assume the 300 default"
+    )
+    assert not s.cookie_encryption_key, (
+        "COOKIE_ENCRYPTION_KEY leaked from root .env; mirror tests assume "
+        "plaintext cookie jars"
+    )
     assert s.cancel_wait_seconds == 2.0, "CANCEL_WAIT_SECONDS did not take effect"
+    assert s.use_node is False, (
+        "USE_NODE leaked from root .env into the test process; "
+        "seam hygiene tests assume the OFF default"
+    )
+    assert s.use_node_browser is False, (
+        "USE_NODE_BROWSER leaked from root .env into the test process; "
+        "seam hygiene tests assume the OFF default"
+    )
+    assert s.node_base_url == "http://127.0.0.1:9334", (
+        "NODE_BASE_URL leaked from root .env; seam tests assume the code default"
+    )
+    assert s.use_go_worker is False, (
+        "USE_GO_WORKER leaked from root .env into the test process; "
+        "seam hygiene tests assume the OFF default"
+    )
+    assert s.go_worker_base_url == "http://127.0.0.1:8080", (
+        "GO_WORKER_BASE_URL leaked from root .env; seam tests assume the "
+        "code default"
+    )
+    assert not s.redis_url, (
+        "REDIS_URL leaked from root .env into the test process; the hermetic "
+        "suite must not open a real Redis connection. The Redis-backed job "
+        "state path is covered by fakeredis tests instead."
+    )
 
 
 _check_environment()

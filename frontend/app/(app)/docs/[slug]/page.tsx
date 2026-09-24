@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Eyebrow, PageHeading } from "@/components/display";
+import { Eyebrow, PageHeading } from "@/components/views/Display";
 import { DOCS_PAGES, findDocsPage } from "@/lib/docs-meta";
 import { getDocsBody } from "../content";
 
@@ -30,7 +30,7 @@ export default async function DocsSlugPage({ params }: { params: Promise<{ slug:
       <header className="border-b border-border pb-8">
         <Eyebrow>Documentation</Eyebrow>
         <PageHeading>{page.title}</PageHeading>
-        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{page.description}</p>
+        <p className="max-w-2xl text-sm leading-relaxed text-ink-muted">{page.description}</p>
       </header>
       <div className="space-y-4">{body}</div>
     </>

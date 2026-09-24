@@ -7,7 +7,8 @@
 #   * frontend: `next dev` (hot reload) on the frontend-dev target, source
 #     bind-mounted; node_modules/.next live in anonymous volumes so the host
 #     never pollutes or is polluted by container deps
-#   * postgres stays (same engine as prod — Alembic/PG bugs surface early)
+#   * the DB is managed Supabase (same for dev and prod — no compose postgres;
+#     Alembic/PG quirks surface in dev too)
 #
 # Production deployments run with the override explicitly ignored:
 #   docker compose -f docker-compose.yml --profile prod up -d --build
@@ -35,7 +36,7 @@ services:
       target: frontend-dev
       args:
         # next dev reads NEXT_PUBLIC_* at runtime; bake nothing.
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
         NEXT_PUBLIC_SITE_URL: http://localhost:3000
     image: postharvest-frontend-dev:latest
     ports:
@@ -45,7 +46,7 @@ services:
       - frontend-node-modules:/app/node_modules
       - frontend-next-cache:/app/.next
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
 
 volumes:

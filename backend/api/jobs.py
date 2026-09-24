@@ -16,10 +16,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.auth.dependencies import get_current_user
+from backend.core import cache, job_state
 from backend.core.config import get_settings
 from backend.core.database import get_db
-from backend.core.exceptions import AppError, NotFoundError
-from backend.core.job_manager import JobManager
+from backend.core.exceptions import AppError, InvalidInputError, NotFoundError
+from backend.core.job_queue import get_job_queue
 from backend.models.errors import ScrapeError
 from backend.models.posts import Post
 from backend.models.scrape_jobs import ScrapeJob
@@ -58,6 +59,10 @@ def _get_job_or_404(db: Session, job_id: str, owner_id: int | None = None) -> Sc
 def list_jobs(
     page: int = Query(1, ge=1, description="1-based page number"),
     page_size: int = Query(25, ge=1, le=100, description="Items per page (max 100)"),
+    status: str | None = Query(
+        None,
+        description="Comma-separated status filter (e.g. 'queued,running'). Powers the ops-panel active-jobs list.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> JobListResponse:
@@ -65,17 +70,31 @@ def list_jobs(
     settings = get_settings()
     page_size = min(page_size, settings.page_size_max)
 
+    statuses: list[str] | None = None
+    if status is not None:
+        statuses = [part.strip().lower() for part in status.split(",") if part.strip()]
+        unknown = [s for s in statuses if s not in ("queued", "running", "paused", "completed", "failed")]
+        if not statuses or unknown:
+            raise InvalidInputError(
+                f"Unknown job status filter: {', '.join(unknown) or status!r}. "
+                "Use queued, running, paused, completed, failed."
+            )
+
+    base_where = [ScrapeJob.owner_id == current_user.id]
+    if statuses is not None:
+        base_where.append(ScrapeJob.status.in_(statuses))
+
     total = int(
         db.scalar(
             select(func.count())
             .select_from(ScrapeJob)
-            .where(ScrapeJob.owner_id == current_user.id)
+            .where(*base_where)
         )
         or 0
     )
     jobs = db.scalars(
         select(ScrapeJob)
-        .where(ScrapeJob.owner_id == current_user.id)
+        .where(*base_where)
         .order_by(ScrapeJob.created_at.desc(), ScrapeJob.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -236,8 +255,9 @@ def delete_job(
     job.cancel_requested = True
     db.commit()
 
-    manager = JobManager.get()
+    manager = get_job_queue()
     manager.cancel(job.id, wait_seconds=get_settings().cancel_wait_seconds)
+    job_state.delete_state(job.id)  # drop the Redis mirror with the rows (§8b)
 
     db.execute(
         delete(ScrapeJob).where(
@@ -245,6 +265,7 @@ def delete_job(
         )
     )
     db.commit()
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return Response(status_code=204)
 
 
@@ -268,7 +289,9 @@ def pause_job(
             code="invalid_state",
         )
     job.status = "paused"
+    job_state.set_status(job.id, "paused")  # Redis mirror (finalplanv2 §8b)
     db.commit()
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return {"job_id": job.id, "status": "paused"}
 
 
@@ -293,5 +316,13 @@ def resume_job(
         )
     job.status = "queued"
     job.cancel_requested = False
+    job_state.clear_cancel(job.id)  # resume clears any Redis cancel flag (§8b)
+    job_state.set_status(job.id, "queued")  # Redis mirror (finalplanv2 §8b)
     db.commit()
+    # A bare status flip strands the job: no worker watches the table, so
+    # hand it to the pool here (same entry point as a fresh submit).
+    from backend.services.job_service import run_scrape_job
+
+    get_job_queue().submit(job.id, run_scrape_job)
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return {"job_id": job.id, "status": "queued"}

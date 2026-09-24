@@ -29,16 +29,21 @@ def _init_firebase() -> firebase_admin.App:
     # 1. Try explicit env vars (private key / client email / project id)
     if settings.firebase_client_email and settings.firebase_private_key:
         private_key = settings.firebase_private_key.replace("\\n", "\n")
-        cred = credentials.Certificate({
-            "type": "service_account",
-            "project_id": settings.firebase_project_id or "postharvest-firebase",
-            "client_email": settings.firebase_client_email,
-            "private_key": private_key,
-            "token_uri": "https://oauth2.googleapis.com/token",
-        })
-        _app = firebase_admin.initialize_app(cred)
-        logger.info("Firebase Admin initialized via environment variable credentials")
-        return _app
+        if "BEGIN PRIVATE KEY" not in private_key:
+            private_key = f"-----BEGIN PRIVATE KEY-----\n{private_key.strip()}\n-----END PRIVATE KEY-----\n"
+        try:
+            cred = credentials.Certificate({
+                "type": "service_account",
+                "project_id": settings.firebase_project_id or "postharvest-5a5bb",
+                "client_email": settings.firebase_client_email,
+                "private_key": private_key,
+                "token_uri": "https://oauth2.googleapis.com/token",
+            })
+            _app = firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin initialized via environment variable credentials")
+            return _app
+        except Exception as exc:
+            logger.warning("Failed to initialize Firebase Admin via env vars, attempting file fallback: %s", exc)
 
     # 2. Try JSON file path in config or search workspace for *-firebase-adminsdk-*.json
     json_path = settings.firebase_credentials_path

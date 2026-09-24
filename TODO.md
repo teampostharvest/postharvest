@@ -1,7 +1,9 @@
 # TODO — PostHarvest
 
-Status snapshot: 2026-09-17. Legend: **✅** done to this stage · **⬜** pending
-(roadmap items from [ROADMAP.md](./ROADMAP.md), reality-checked against the code).
+Status snapshot: 2026-09-18. Legend: **✅** done · **⬜** pending · **🔶** decided-against / needs-product-call
+(Roadmap items from [ROADMAP.md](./ROADMAP.md), reality-checked against the code.)
+
+**Execution order (agreed 2026-09-18): hardening batch → Phase 4 → launch (Phase 3 + Phase 5) → Phase 6.**
 
 ---
 
@@ -62,10 +64,10 @@ Status snapshot: 2026-09-17. Legend: **✅** done to this stage · **⬜** pendi
 ## ⬜ Pending — roadmap phases (from [ROADMAP.md](./ROADMAP.md))
 
 ### Phase 2 — Core SaaS plumbing
-- [ ] **Firebase server-side verification on every `/api` route** — today only a bare `firebase_uid` field exists in `backend/api/auth.py`; no token verification, no Firebase in frontend app code (only `node_modules`)
-- [ ] **`owner_id` on every persisted row** — partial: present in schema + saved-accounts/exports/scrape paths; not audited across all models; backfill migration pending
-- [ ] **Frontend Firebase integration** (Google OAuth + email/password, shared auth provider, dashboard gating)
-- [ ] **Encrypted per-owner FB session storage** + owner-scoped accounts API (still plaintext shared pool `data/fb_cookies_*.json`)
+- [x] **Firebase server-side verification on every `/api` route** — `verify_id_token()` in `backend/auth/firebase.py`; `get_current_user` dependency on all protected routes; auto-provisions users on first login
+- [x] **`owner_id` / tenant ownership and cross-user isolation** — `scrape_jobs.owner_id` FK indexed; all queries filtered by `owner_id`; SQL-level DELETE ownership; Alembic migration covers full schema
+- [x] **Frontend Firebase integration** (Google OAuth + email/password, shared auth provider, dashboard gating) — `frontend/lib/firebase.ts`, `auth-context.tsx`, route gating in `(app)/layout.tsx`, Bearer token auto-injection in `api.ts`
+- [x] **Encrypted per-owner FB session storage** + owner-scoped accounts API — Fernet encryption via `COOKIE_ENCRYPTION_KEY`; personal sessions under `data/personal/{owner_id}/`; `SavedAccount` model with `owner_id`; owner-scoped API endpoints
 
 ### Phase 3 — Production topology
 - [ ] **Let's Encrypt / nginx TLS** + point `postharvest.space` DNS (public deploy still pending — stack currently runs on the laptop, LAN)
@@ -73,10 +75,15 @@ Status snapshot: 2026-09-17. Legend: **✅** done to this stage · **⬜** pendi
 - [x] nginx service + docker network layout already in place (roadmap's local postgres container is superseded by Supabase)
 
 ### Phase 4 — Hardening & abuse protection
-- [ ] **Quota middleware** (concurrency + page caps + daily ceiling) — **not implemented yet** (no quota code in the backend)
-- [ ] **Startup sweep** for orphaned `running` jobs + quota release (decision locked in ROADMAP; implementation pending)
-- [ ] Outbound **proxy rotation** wiring exposed via env
-- [ ] **Structured logs + request IDs** + basic error telemetry
+- [x] **Quota enforcement** (concurrency + per-job caps) — `concurrent_jobs`, `urls`, `max_posts`, `personal_accounts` enforced in `job_service.py` + `accounts.py`; observable via `GET /api/usage` + `GET /api/plans` (2026-09-18)
+- [x] **Tier gating** — self-service `PATCH /api/auth/me/plan` deleted; tiers are operator-assigned only via `PATCH /api/admin/users/{id}/plan` (2026-09-18)
+- [x] **DB pool guardrails** — Postgres pool capped at 5 with 10 s checkout timeout + 5 s TCP connect timeout + regression tests in `tests/test_db_pool.py` (2026-09-18)
+- [x] **API timeout + retry UI** — 20 s fetch ceiling, polling hooks expose `{error, reload}`, sidebar shows retry instead of permanent loaders (2026-09-18)
+- [x] **`GET /api/jobs?status=` filter** powering the ops-panel active-jobs list (2026-09-18)
+- [x] **Startup sweep** for orphaned `running` jobs + quota release — `sweep_orphaned_jobs()` in `job_service.py` runs in lifespan: `running` → `failed` with `suspended_by_restart` audit row, `queued` re-submitted to workers, `paused` untouched; also fixed `POST /resume` to actually hand the job to a worker (was a no-op status flip stranding jobs in `queued`) — `tests/test_startup_sweep.py` (2026-09-18)
+- [ ] Outbound **proxy rotation** wiring exposed via env (`PROXY_URL(S)` flow per-job today; `ProxyManager` rotation never instantiated from env)
+- [ ] **Structured logs + request IDs** + basic error telemetry (logs exist as `postharvest.*`; no request IDs yet)
+- [ ] Daily post ceiling — 🔶 recommend against inventing one (per-source/per-job caps already bound spend); pricing decision first if billing needs it
 
 ### Phase 5 — Launch
 - [ ] Seed admin account + full-funnel smoke test on prod Postgres over nginx/TLS
@@ -87,15 +94,19 @@ Status snapshot: 2026-09-17. Legend: **✅** done to this stage · **⬜** pendi
 - [ ] `Organization`/`plan` + subscription hooks behind the existing limits resolver
 - [ ] Stripe checkout + webhooks + customer portal; plan gating by tier
 - [ ] Plan-aware UI (strictly post-billing)
+- [ ] 🔶 CONTRADICTION (2026-09-18): plan-aware UI already shipped (pricing catalog from `/api/plans`, tier badges, operator assignment in Settings) despite the "no UI" rule — bless it or gate it behind a billing flag
 
 ---
 
-## ⬜ Pending — engineering follow-ups (parked at this stage)
+## ⬜ Pending — engineering follow-ups (hardening batch, agreed order)
 
-- [ ] **Flaky WS mirror test still flakes in CI** — `test_capture_ws_bridge_forwards_frames` → `CancelledError` (failed on the master push 2026-09-17: 178 passed / 1 failed). Earlier fix `91820b3` helped locally but is insufficient under CI load
-- [ ] **GitHub branch protection** on `master` (require PR + CI checks, only `next → master`)
+- [ ] **Startup sweep** for orphaned `running` jobs on boot (see Phase 4)
+- [ ] **Request IDs** in logs + error responses (see Phase 4)
 - [ ] **Release → deployment/version consumption** — images still `:latest`, `backend settings.version` hardcoded `"1.0.0"` in `/api/health`; wire release versions through
-- [ ] **Add Python 3.13 to the CI matrix** (currently runs 3.11)
+- [ ] **Add Python 3.13 to the CI matrix** (currently runs 3.11, 3.12)
+- [ ] **Flaky WS mirror test still flakes in CI** — `test_capture_ws_bridge_forwards_frames` → `CancelledError` (failed on the master push 2026-09-17: 178 passed / 1 failed). Earlier fix `91820b3` helped locally but is insufficient under CI load
+- [ ] **GitHub branch protection** on `master` (require PR + CI checks, only `next → master`) — needs repo admin, do at launch
+- [ ] 🔶 **Redis deferred to post-launch** (2026-09-21): single-replica backend in-process job/rate-limit state means Redis has no payoff today; re-evaluate only when ≥2 replicas / separate workers become real (then: PG `SKIP LOCKED` queue first, Redis second)
 
 ---
 

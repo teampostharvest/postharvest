@@ -18,14 +18,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from backend.core.config import get_settings
+
 ALLOWED_POST_TYPES = ("text", "image", "video", "link", "all")
+
+# Keep the request-level bound in lockstep with the global service cap
+# (MAX_URLS_PER_JOB) so plan ceilings like Team's 150 are actually reachable.
+_URLS_MAX = get_settings().max_urls_per_job
 
 
 class ScrapeRequest(BaseModel):
     urls: list[str] = Field(
         ...,
         min_length=1,
-        max_length=100,
+        max_length=_URLS_MAX,
         description="Facebook page/profile URLs (one or more)",
     )
     max_posts: int | None = Field(

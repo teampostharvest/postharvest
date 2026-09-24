@@ -6,7 +6,15 @@ import pytest
 from backend.core.database import SessionLocal
 from backend.models import ScrapeJob, User
 from backend.scraper.browser_scraper import save_cookies
-from helpers import error_envelope, insert_completed_job
+from helpers import (
+    error_envelope,
+    install_fake_scraper,
+    insert_completed_job,
+    make_source_result,
+    PAGE_URL,
+    sample_posts,
+    wait_for_job,
+)
 
 # A session cookie set that status-checks as VALID (xs present, far future).
 _VALID_COOKIES = [
@@ -216,6 +224,46 @@ def test_plan_url_limit_enforced(authed_client):
     resp = authed_client.post("/api/scrape", json={"urls": urls})
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == "plan_limit"
+
+
+def test_team_plan_url_limit_enforced(authed_client):
+    """Team allows 150 URLs; a 151st is rejected (global cap is 300)."""
+    authed_client.get("/api/auth/me")
+    _set_user("test_firebase_uid_user_a", plan="team")
+    urls = [f"https://facebook.com/page{i}" for i in range(151)]
+    resp = authed_client.post("/api/scrape", json={"urls": urls})
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == "plan_limit"
+
+
+def test_pro_plan_url_limit_raised_to_50(authed_client):
+    """Pro's per-job URL cap moved from 20 to 50 with the tier rework."""
+    authed_client.get("/api/auth/me")
+    _set_user("test_firebase_uid_user_a", plan="pro")
+    urls = [f"https://facebook.com/page{i}" for i in range(51)]
+    resp = authed_client.post("/api/scrape", json={"urls": urls})
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == "plan_limit"
+
+
+def test_enterprise_plan_has_no_url_ceiling(authed_client, monkeypatch):
+    """Enterprise: no per-plan URL cap — only the global cap applies."""
+    install_fake_scraper(
+        monkeypatch,
+        result_factory=lambda url, options=None, progress_cb=None, cancel_event=None: make_source_result(
+            url, posts=sample_posts(1)
+        ),
+    )
+    authed_client.get("/api/auth/me")
+    _set_user("test_firebase_uid_user_a", plan="enterprise")
+    # 200 URLs is below the global cap (300) and above any old plan cap,
+    # so it must succeed for Enterprise.
+    urls = [f"https://www.facebook.com/page{i}" for i in range(200)]
+    resp = authed_client.post("/api/scrape", json={"urls": urls})
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "queued"
+    wait_for_job(authed_client, body["job_id"])
 
 
 def test_plan_max_posts_limit_enforced(authed_client):

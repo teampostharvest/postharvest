@@ -1,0 +1,95 @@
+{
+	"folders": [
+		{
+			"name": "Root",
+			"path": "."
+		},
+		{
+			"name": "Backend (Python)",
+			"path": "backend"
+		},
+		{
+			"name": "Frontend",
+			"path": "frontend"
+		},
+		{
+			"name": "Go Services",
+			"path": "go"
+		},
+		{
+			"name": "Node Services",
+			"path": "node"
+		},
+		{
+			"name": "Infra & DevOps",
+			"path": "infra"
+		},
+		{
+			"name": "Deploy & Docker",
+			"path": "deploy"
+		},
+		{
+			"name": "Scripts & Tools",
+			"path": "scripts"
+		},
+		{
+			"name": "Documentation & AI",
+			"path": "docs"
+		}
+	],
+	"settings": {
+		// Python Environment Settings
+		"python.defaultInterpreterPath": ".venv/bin/python",
+		"python.analysis.extraPaths": [
+			"${workspaceFolder}/backend",
+			"${workspaceFolder}/scripts"
+		],
+		"python.testing.pytestArgs": [
+			"tests"
+		],
+		"python.testing.unittestEnabled": false,
+		"python.testing.pytestEnabled": true,
+
+		// Go Settings
+		"go.gopath": "${workspaceFolder}/go",
+
+		// File Exclusions & Clean Search
+		"files.exclude": {
+			"**/.git": true,
+			"**/.DS_Store": true,
+			"**/__pycache__": true,
+			"**/*.pyc": true,
+			"**/node_modules": true,
+			"**/nohup.out": true
+		},
+		"search.exclude": {
+			"**/node_modules": true,
+			"**/__pycache__": true,
+			"**/.venv": true,
+			"**/certs": true,
+			"**/data": true,
+			"**/fonts": true,
+			"**/nohup.out": true
+		},
+		"files.watcherExclude": {
+			"**/.venv/**": true,
+			"**/node_modules/**": true,
+			"**/__pycache__/**": true
+		},
+		"workbench.colorCustomizations": {
+			"minimap.background": "#00000000",
+			"scrollbar.shadow": "#00000000"
+		}
+	},
+	"extensions": {
+		"recommendations": [
+			"ms-python.python",
+			"ms-python.vscode-pylance",
+			"golang.go",
+			"dbaeumer.vscode-eslint",
+			"esbenp.prettier-vscode",
+			"ms-azuretools.vscode-docker",
+			"redhat.vscode-yaml"
+		]
+	}
+}

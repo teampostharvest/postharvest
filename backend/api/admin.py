@@ -2,7 +2,7 @@
 
 * GET    /api/admin/users           — list all users (id, email, plan, role, …)
 * PATCH  /api/admin/users/{id}/role — promote/demote between user/ops
-* PATCH  /api/admin/users/{id}/plan — set Basic/Pro/Enterprise tier
+* PATCH  /api/admin/users/{id}/plan — set Basic/Pro/Team/Enterprise tier
 
 Every route is gated by :func:`require_ops` (403 ``admin_required`` for
 regular users). An operator cannot demote themselves, to avoid accidentally
@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import require_ops
+from backend.core import cache
 from backend.core.database import get_db
 from backend.core.exceptions import AppError, NotFoundError
 from backend.core.plans import PLANS, normalize_plan
@@ -48,7 +49,7 @@ class RoleUpdate(BaseModel):
 
 
 class PlanUpdate(BaseModel):
-    plan: Literal["basic", "pro", "enterprise"] = Field(..., description="New tier")
+    plan: Literal["basic", "pro", "team", "enterprise"] = Field(..., description="New tier")
 
 
 @router.get(
@@ -85,6 +86,9 @@ def set_user_role(
     user.role = payload.role
     db.commit()
     db.refresh(user)
+    # The identity cache gates ops-only routes; a stale role must not outlive
+    # the admin action that changed it.
+    cache.invalidate_user(user.firebase_uid)
     return AdminUserOut.model_validate(user)
 
 
@@ -103,6 +107,9 @@ def set_user_plan(
     user.plan = normalize_plan(payload.plan)
     db.commit()
     db.refresh(user)
+    # Plan drives quota enforcement and the usage readout; drop the cached
+    # identity so the new tier takes effect on the next request.
+    cache.invalidate_user(user.firebase_uid)
     return AdminUserOut.model_validate(user)
 
 

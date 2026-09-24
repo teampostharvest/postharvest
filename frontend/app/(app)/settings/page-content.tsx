@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { AlertCircle, Check, RefreshCw, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/components/common/ThemeProvider";
+import { AccountCard } from "@/components/common/AccountCard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Skeleton, SkeletonText } from "@/components/ui/skeleton";
 import {
   readScrapeDefaults,
   writeScrapeDefaults,
@@ -81,7 +83,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="animate-fade-in-up space-y-6">
+    <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Appearance</CardTitle>
@@ -101,10 +103,10 @@ export default function SettingsPage() {
                 onClick={() => setTheme(option.value)}
                 aria-pressed={theme === option.value}
                 className={cn(
-                  "flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors",
+                  "flex items-center gap-2 rounded-sm border px-3 py-1.5 text-sm transition-colors",
                   theme === option.value
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-border text-muted-foreground hover:bg-muted",
+                    ? "border-ink bg-ink text-bg"
+                    : "border-border-strong text-ink-muted hover:bg-bg-subtle",
                 )}
               >
                 {theme === option.value ? <Check className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" /> : null}
@@ -124,7 +126,9 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {defaults === null ? (
-            <p className="text-sm text-muted-foreground">loading…</p>
+            <div role="status" aria-label="Loading defaults">
+              <SkeletonText lines={3} />
+            </div>
           ) : (
             <>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -174,17 +178,17 @@ export default function SettingsPage() {
                   type="checkbox"
                   checked={defaults.useBrowser}
                   onChange={(event) => update({ useBrowser: event.target.checked })}
-                  className="mt-0.5 h-4 w-4 accent-foreground"
+                  className="mt-0.5 h-4 w-4 accent-ink"
                 />
                 <span className="space-y-1">
                   <span className="block text-sm font-medium">Browser mode by default</span>
-                  <span className="block text-xs text-muted-foreground">
+                  <span className="block text-xs text-ink-muted">
                     Scrape the page's own GraphQL feed via Playwright instead of the static HTML fallback.
                   </span>
                 </span>
               </label>
 
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-ink-muted">
                 {saved ? "Saved ✓" : "Changes save immediately."}
               </p>
             </>
@@ -204,7 +208,7 @@ export default function SettingsPage() {
             </div>
             <div className="flex items-center gap-2">
               {adminError ? (
-                <span className="flex items-center gap-1.5 rounded-sm border border-red-700/40 bg-red-700/10 px-2 py-1 text-xs text-red-700">
+                <span className="flex items-center gap-1.5 rounded-sm border border-danger/40 bg-danger/10 px-2 py-1 text-xs text-danger">
                   <AlertCircle className="h-3 w-3" aria-hidden="true" />
                   {adminError}
                 </span>
@@ -213,20 +217,24 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => void loadUsers()}
                 disabled={usersLoading}
-                className="flex items-center gap-1.5 rounded-sm border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-sm border border-border-strong px-2 py-1 text-xs text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
               >
-                <RefreshCw className="h-3 w-3" strokeWidth={1.75} /> refresh
+                <RefreshCw className="h-3 w-3" strokeWidth={1.75} /> Refresh
               </button>
             </div>
           </CardHeader>
           <CardContent>
             {usersLoading && users.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">loading users…</p>
+              <div className="py-4" role="status" aria-label="Loading users">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="mt-2 h-9 w-full" />
+                <Skeleton className="mt-2 h-9 w-full" />
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-sm">
                   <thead>
-                    <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <tr className="border-b border-border text-left text-xs font-medium text-ink-muted">
                       <th className="px-2 py-2 font-medium">User</th>
                       <th className="px-2 py-2 font-medium">Role</th>
                       <th className="px-2 py-2 font-medium">Plan</th>
@@ -239,9 +247,13 @@ export default function SettingsPage() {
                         <tr key={user.id}>
                           <td className="px-2 py-2.5">
                             <p className="font-medium">{user.display_name || user.email || `User #${user.id}`}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {user.email ?? "no email"}
-                              {user.is_active ? "" : " · disabled"}
+                            <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+                              <span>{user.email ?? "no email"}</span>
+                              {user.is_active ? null : (
+                                <span className="rounded-sm bg-bg-subtle px-1.5 py-0.5 font-medium text-ink-muted">
+                                  disabled
+                                </span>
+                              )}
                             </p>
                           </td>
                           <td className="px-2 py-2.5">
@@ -278,13 +290,15 @@ export default function SettingsPage() {
                 </table>
               </div>
             )}
-            <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-ink-muted">
               <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-              Tiers: Basic / Pro / Enterprise. You can't demote yourself.
+              Tiers: Basic / Pro / Team / Enterprise. You can't demote yourself.
             </p>
           </CardContent>
         </Card>
       ) : null}
+
+      <AccountCard />
     </div>
   );
 }

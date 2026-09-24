@@ -69,7 +69,7 @@ DECISIONS.md
 browser_posts.json
 posts.json
 posts.xlsx
-reports/
+/reports/
 fix-bugs-*.json
 nohup.out
 inspo/
@@ -77,4 +77,5 @@ inspo/
 # Firebase service account credentials
 serviceAccountKey.json
 *firebase-adminsdk*.json
-
+fonts/**
+/plans/**.md
