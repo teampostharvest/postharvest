@@ -36,6 +36,7 @@ from backend.core.database import init_db
 from backend.core.exceptions import AppError
 from backend.core.job_queue import get_job_queue
 from backend.core.logging import get_logger, setup_logging
+from backend.core.metrics import MetricsMiddleware, render_metrics
 
 logger = get_logger("main")
 
@@ -96,6 +97,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Request metrics for Prometheus scraping (internal-only; nginx never
+    # proxies /metrics). Outermost so every HTTP request is counted, even
+    # ones rejected by CORS preflight.
+    app.add_middleware(MetricsMiddleware)
 
     _register_exception_handlers(app)
 
@@ -110,6 +115,16 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix=settings.api_prefix)
     app.include_router(exports.router, prefix=settings.api_prefix)
     app.include_router(health.router, prefix=settings.api_prefix)
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics() -> "Response":
+        """Prometheus text exposition. Internal-only (compose networks)."""
+        from fastapi.responses import Response
+
+        return Response(
+            content=render_metrics(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     return app
 

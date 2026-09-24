@@ -27,6 +27,7 @@ import redis
 
 from backend.core import job_state
 from backend.core.logging import get_logger
+from backend.core.metrics import REDIS_ERRORS
 
 logger = get_logger("core.cache")
 
@@ -46,9 +47,11 @@ def _safe(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except redis.RedisError:
+        REDIS_ERRORS.inc()
         logger.debug("Redis cache call failed (treating as miss)", exc_info=True)
         return None
     except Exception:  # noqa: BLE001 - same contract as RedisError
+        REDIS_ERRORS.inc()
         logger.debug("Unexpected Redis cache failure", exc_info=True)
         return None
 

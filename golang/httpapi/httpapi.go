@@ -25,6 +25,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	worker "postharvest/golang"
 	"postharvest/golang/contract"
 	"postharvest/golang/idempotency"
@@ -146,6 +148,10 @@ func NewHandler(clock Clock, store idempotency.Store) http.Handler {
 	health := worker.NewHandler()
 	mux.Handle("/healthz", health)
 	mux.Handle("/readyz", health)
+	// Prometheus exposition (plans/monitoring.md): process + Go runtime
+	// metrics from the default registry. Never published outside the compose
+	// networks (like every other /metrics in the stack).
+	mux.Handle("/metrics", promhttp.Handler())
 	return mux
 }
 

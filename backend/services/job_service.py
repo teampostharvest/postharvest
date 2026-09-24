@@ -51,6 +51,7 @@ from backend.core import cache, job_state
 from backend.core.job_manager import CancelToken
 from backend.core.job_queue import get_job_queue
 from backend.core.logging import get_logger
+from backend.core.metrics import SCRAPE_JOBS
 from backend.models.engagement_metrics import EngagementMetric
 from backend.models.errors import ScrapeError
 from backend.models.media import Media
@@ -658,6 +659,7 @@ def _finalize(job_id: str, token: CancelToken | None) -> None:
     # Redis mirror for the terminal status (finalplanv2 §8b). The mirror key
     # stays put so replicas can read a terminal job without hitting the DB.
     job_state.set_status(job_id, "failed" if cancelled else "completed")
+    SCRAPE_JOBS.labels(result="cancelled" if cancelled else "done").inc()
     cache.invalidate_usage(owner_id)  # quota readout changed (job terminal)
 
 
@@ -676,6 +678,7 @@ def _finalize_failure(job_id: str, code: str, message: str) -> None:
         )
         db.commit()
     job_state.set_status(job_id, "failed")  # Redis mirror (finalplanv2 §8b)
+    SCRAPE_JOBS.labels(result="failed").inc()
     cache.invalidate_usage(owner_id)  # quota readout changed (job terminal)
 
 

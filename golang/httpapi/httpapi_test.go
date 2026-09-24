@@ -325,6 +325,23 @@ func TestHandlerIncludesHealthProbes(t *testing.T) {
 	}
 }
 
+func TestHandlerExposesMetrics(t *testing.T) {
+	h := newTestHandler()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/metrics: status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "go_goroutines") {
+		t.Fatalf("/metrics should include Go runtime metrics, got:\n%s", body)
+	}
+	if !strings.Contains(body, "process_cpu_seconds_total") {
+		t.Fatalf("/metrics should include process metrics, got:\n%s", body)
+	}
+}
+
 // recordingStore wraps idempotency.Memory and counts cache operations so the
 // HTTP proofs can distinguish "served from cache" from "re-parsed" without
 // any network.

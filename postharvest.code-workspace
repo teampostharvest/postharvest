@@ -1,11 +1,11 @@
 {
 	"folders": [
 		{
-			"name": "Root",
+			"name": "root",
 			"path": "."
 		},
 		{
-			"name": "Backend (Python)",
+			"name": "backend python",
 			"path": "backend"
 		},
 		{
@@ -13,15 +13,15 @@
 			"path": "frontend"
 		},
 		{
-			"name": "Go Services",
-			"path": "go"
+			"name": "go worker",
+			"path": "golang"
 		},
 		{
-			"name": "Node Services",
+			"name": "backend nodejs",
 			"path": "node"
 		},
 		{
-			"name": "Infra & DevOps",
+			"name": "infrastructure",
 			"path": "infra"
 		},
 		{
@@ -29,11 +29,11 @@
 			"path": "deploy"
 		},
 		{
-			"name": "Scripts & Tools",
+			"name": "scripts",
 			"path": "scripts"
 		},
 		{
-			"name": "Documentation & AI",
+			"name": "documentation",
 			"path": "docs"
 		}
 	],

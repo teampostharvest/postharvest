@@ -15,6 +15,7 @@ import { LocalTokenBucket, RedisTokenBucket, type Bucket } from "./fetch/rate-li
 import { RobotsTxtPolicy, type RobotsPolicy } from "./fetch/robots.js";
 import { fetchPage, type FetchPageOptions, type FetchResult } from "./fetch/http-mode.js";
 import type { BrowserOpenFn } from "./browser-mode/types.js";
+import { registerMetricsHooks } from "./metrics.js";
 
 export interface BuildAppOptions {
   config?: Config;
@@ -70,6 +71,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     fetchImpl: opts.fetchImpl,
     browserOpen: opts.browserOpen,
   });
+  registerMetricsHooks(app);
 
   return { app, config, redis };
 }
