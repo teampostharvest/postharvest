@@ -3,7 +3,8 @@
 Public interface consumed by the API layer (SA01):
 
     validate_facebook_url(url) -> {"valid", "normalized_url", "reason"}
-    scrape_source(url, options, progress_cb=None, cancel_event=None) -> SourceResult
+    scrape_source(url, options, progress_cb=None, cancel_event=None,
+                  idempotency_key=None) -> SourceResult
     ScrapeOptions / SourceResult  (dataclasses)
 
 Compliance summary (spec §6 / §9 / §10) - see module docstrings of
@@ -52,6 +53,56 @@ from .normalizer import NORMALIZED_KEYS, normalize_post
 from .parser import parse_page
 from .stats import Stats
 from .url_validator import validate_or_raise
+
+# -- C hermetic runtime-cache consult seam (plan §8 "snappy" cache) --------
+# Hermetic-default: **disarmed** (``_SCRAPE_TTL_CONSULT is None``) so the
+# pre-existing node-browser suite keeps every ``== N`` byte untouched
+# (add-don't-replace, same mold as the Local/Redis bucket arming pair).
+# The hermetic C-paper (``tests/test_scrape_ttl_cache_hermetic.py``) arms
+# this consult via ``monkeypatch`` — never via env / ``settings``.
+_SCRAPE_TTL_CONSULT = None  # armed to a ``TTLCache`` by the hermetic suite
+
+
+def arm_scrape_ttl_cache(ttl_seconds: float) -> None:
+    """Production arming of the hermetic consult seam (finalplanv2 §8).
+
+    Hermetic default stays DISARMED (``_SCRAPE_TTL_CONSULT is None``);
+    the host FastAPI app arms it at startup when ``SCRAPE_TTL_SECONDS>0``
+    (see backend.main:lifespan).  The hermetic C-paper arms via
+    ``monkeypatch`` exactly as before — never via this env-driven path —
+    so every suite keeps its bytes (add-don't-replace).
+    """
+    global _SCRAPE_TTL_CONSULT
+    if ttl_seconds and ttl_seconds > 0:
+        from backend.core.cache import TTLCache
+
+        cache = TTLCache(ttl_seconds=float(ttl_seconds))
+        cache.arm(True)
+        _SCRAPE_TTL_CONSULT = cache
+    else:
+        _SCRAPE_TTL_CONSULT = None
+
+
+def _ttl_consult(normalized_url: str):
+    """Serve the node leg's payload from the TTL window if armed+fresh.
+
+    The byte C seals: two identical ``scrape_source`` calls within the TTL
+    window → the node seam is visited EXACTLY ONCE; the 2nd identical call
+    is served byte-equal from this hermetic consult (never re-visiting
+    ``_node_fetch_page`` at :316).  Disarmed default → legacy byte-for-byte.
+    """
+    consult = _SCRAPE_TTL_CONSULT
+    if consult is None:
+        return None
+    return consult.get(normalized_url)
+
+
+def _ttl_store(normalized_url: str, payload) -> None:
+    """Write the node leg's payload into the armed TTL window (no-op off)."""
+    consult = _SCRAPE_TTL_CONSULT
+    if consult is not None:
+        consult.set(normalized_url, payload)
+
 
 __version__ = "0.1.0"
 
@@ -239,6 +290,7 @@ def scrape_source(
     options: Optional[ScrapeOptions] = None,
     progress_cb: Optional[ProgressCallback] = None,
     cancel_event: Optional[threading.Event] = None,
+    idempotency_key: Optional[str] = None,
 ) -> SourceResult:
     """Scrape one Facebook page/profile source.
 
@@ -256,6 +308,10 @@ def scrape_source(
     :param cancel_event: optional ``threading.Event``; when set, the scrape
         stops at the next checkpoint, preserving partial results and adding a
         ``cancelled`` error entry.
+    :param idempotency_key: ``"{job_id}:{source_id}"`` — passed to the go
+        worker's §8(c) idempotency guard (finalplanv2 §5/§8c) so a retried
+        parse is served from go's cache instead of recomputed.  Only used
+        when ``USE_GO_WORKER`` is on; ignored by the legacy path.
     :returns: :class:`SourceResult`.  This function NEVER raises for
         source-level failures - invalid URLs, login walls, rate limits,
         timeouts and 404s are all reported in ``result.errors``.
@@ -307,13 +363,48 @@ def scrape_source(
             proxy_url=options.proxy_url,
         )
         try:
-            fetch = fetcher.fetch_page(normalized_url)
+            # finalplanv2 §14: when USE_NODE is on, HTTP-mode fetches
+            # are delegated to the node service (robots/throttle/retry
+            # happen there); the flag-off path below is byte-for-byte the
+            # legacy Fetcher. Parsing/normalization/dedup are identical for
+            # both paths.
+            if _node_enabled():
+                cached_fetch = _ttl_consult(normalized_url)
+                if cached_fetch is not None:
+                    # C: identical scrape within the TTL window is served
+                    # byte-equal from the hermetic runtime cache — the node
+                    # seam is NOT re-visited (byte: ``== 1`` across two
+                    # identical ``scrape_source`` calls).
+                    fetch = cached_fetch
+                else:
+                    fetch = _node_fetch_page(normalized_url, cancel_event)
+                    _ttl_store(normalized_url, fetch)
+            else:
+                fetch = fetcher.fetch_page(normalized_url)
             logger.info(
                 "Fetched %s variant=%s status=%s final_url=%s bytes=%d",
                 url, fetch.variant, fetch.status_code,
                 fetch.final_url, len(fetch.html),
             )
             emit("parsing")
+            if _go_worker_enabled():
+                # M7 seam: the go worker owns the compute slice
+                # (parse -> normalize -> dedup, byte-equal to this pipeline —
+                # proven by the golang httpapi goldens).  Filters + max_posts
+                # cap stay here; all bookkeeping after this point lives in
+                # _finish_source_via_go.  TTL-cache consult/store above wrap
+                # the FETCH only, exactly as on the legacy path.
+                go = _go_worker_parse(
+                    fetch.html,
+                    normalized_url,
+                    handle=_handle_of(normalized_url),
+                    idempotency_key=idempotency_key,
+                    cancel_event=cancel_event,
+                )
+                return _finish_source_via_go(
+                    url, go, options, stats, errors_list,
+                    handle_counter, emit, cancel_event,
+                )
             page = parse_page(
                 fetch.html,
                 page_url=fetch.final_url,
@@ -430,3 +521,132 @@ def _handle_of(normalized_url: str) -> Optional[str]:
     if segments[0] in ("profile.php", "people"):
         return None
     return segments[0]
+
+
+def _node_enabled() -> bool:
+    """True when HTTP-mode fetches should be delegated to node."""
+    from backend.core.config import get_settings
+    return get_settings().use_node
+
+
+def _node_fetch_page(normalized_url: str,
+                     cancel_event: Optional[threading.Event]):
+    """Fetch a page through the node service.
+
+    Lazy import keeps scraper -> services -> (scraper.fetcher/errors) from
+    forming a module-level cycle; the seam itself lives in
+    ``backend/services/node_fetch.py``.
+    """
+    from backend.services.node_fetch import fetch_page_via_node
+    return fetch_page_via_node(normalized_url, cancel_event=cancel_event)
+
+
+def _go_worker_enabled() -> bool:
+    """True when the compute slice should be delegated to the go worker."""
+    from backend.core.config import get_settings
+    return get_settings().use_go_worker
+
+
+def _go_worker_parse(fetch_html: str,
+                     normalized_url: str,
+                     handle: Optional[str],
+                     idempotency_key: Optional[str],
+                     cancel_event: Optional[threading.Event]):
+    """Parse one source's bytes through the go worker.
+
+    ``target_url`` is the NORMALIZED url: it lands in every post's
+    ``facebook_url`` (the stored byte) and is what the golang httpapi
+    goldens use for both parse context and normalize context — so the
+    returned posts match the legacy path byte-for-byte.  Lazy import like
+    ``_node_fetch_page`` to keep module cycles out.
+    """
+    from backend.services.go_worker import parse_posts_via_go
+    return parse_posts_via_go(
+        normalized_url,
+        handle=handle,
+        raw_html=fetch_html,
+        idempotency_key=idempotency_key,
+        cancel_event=cancel_event,
+    )
+
+
+def _finish_source_via_go(
+    url: str,
+    go,
+    options: ScrapeOptions,
+    stats: Stats,
+    errors_list: List[Dict[str, str]],
+    handle_counter: int,
+    emit,
+    cancel_event: Optional[threading.Event],
+) -> SourceResult:
+    """The post-parse bookkeeping for the USE_GO_WORKER path.
+
+    Mirrors the legacy slice (filters -> max_posts cap -> stats) on top of
+    what the go worker returns — already-normalized, already-deduped posts
+    plus isolated parse errors.  Two deliberate deviations, both documented
+    in ``backend/services/go_worker.py`` module notes:
+
+    * ``duplicates_removed`` stays 0 (ParseResponse is contract-fixed and
+      carries no dedup count) and ``posts_discovered`` is derived from the
+      counters FastAPI can observe, so the stats invariant
+      (discovered == extracted + skipped + failed) always holds.
+    * Filters run AFTER go's dedup (there is no filter-aware dedup inside
+      the contract); results only diverge from the legacy path in the
+      exotic post-list case described there.
+
+    This function never raises — go-unreachable is a per-source error the
+    caller's ``except ScraperError`` already turned into a failed source.
+    """
+    page_name = go.page_name
+    page_id = go.page_id
+
+    for entry in go.errors:
+        stats.failed(1)
+        handle_counter += 1
+        errors_list.append({"url": url, **entry})
+
+    kept: List[Dict[str, Any]] = []
+    for post in go.posts:
+        if cancel_event is not None and cancel_event.is_set():
+            errors_list.append({
+                "url": url,
+                "code": OperationCancelled.code,
+                "message": OperationCancelled().message,
+            })
+            emit("failed")
+            return SourceResult(
+                url=url, page_name=page_name, page_id=page_id,
+                posts=kept, stats=stats.to_dict(), errors=errors_list)
+
+        if not _passes_filters(post, options):
+            stats.skipped(1)
+            handle_counter += 1
+            emit("processing")
+            continue
+        kept.append(post)
+        handle_counter += 1
+        emit("processing")
+
+    # max_posts cap (go already deduped; nothing to count for duplicates)
+    if options.max_posts is not None and len(kept) > options.max_posts:
+        trimmed = len(kept) - options.max_posts
+        kept = kept[:options.max_posts]
+        stats.skipped(trimmed)
+        handle_counter += trimmed
+
+    stats.extracted(len(kept))
+    # invariant (documented in stats.py): discovered == extracted + skipped
+    # + failed — derived here since go reports no pre-dedup parse counts.
+    stats.discovered(
+        stats.posts_extracted + stats.posts_skipped + stats.posts_failed)
+
+    emit("completed")
+    return SourceResult(
+        url=url,
+        page_name=page_name,
+        page_id=page_id,
+        posts=kept,
+        stats=stats.to_dict(),
+        errors=errors_list,
+    )

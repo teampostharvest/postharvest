@@ -8,6 +8,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, isTerminalStatus } from "./api";
 import type { AccountsResponse, JobProgress, JobSummary, Post, UsageResponse } from "./types";
 
+/**
+ * Background tabs must not keep polling. A hidden tab still pins a Postgres
+ * connection server-side for the life of each request, and a handful of idle
+ * tabs are enough to starve the backend's pool. Pollers skip work while hidden
+ * and refresh immediately when the tab becomes visible again.
+ */
+function shouldPoll(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
+/** Subscribe to tab-visibility changes; invokes `cb` when the tab becomes visible. */
+function onBecomeVisible(cb: () => void): () => void {
+  if (typeof document === "undefined") return () => {};
+  const handler = (): void => {
+    if (document.visibilityState === "visible") cb();
+  };
+  document.addEventListener("visibilitychange", handler);
+  return () => document.removeEventListener("visibilitychange", handler);
+}
+
 export interface JobProgressState {
   job: JobProgress | null;
   error: ApiError | null;
@@ -41,6 +61,13 @@ export function useJobProgress(jobId: string | null, options: { pollMs?: number 
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async (): Promise<void> => {
+      // Hidden tab: don't touch the API, just wait for the next interval.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
       try {
         const next = await api.getJob(jobId);
         if (cancelled) return;
@@ -59,10 +86,15 @@ export function useJobProgress(jobId: string | null, options: { pollMs?: number 
       }
     };
 
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
     void tick();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      detach();
     };
   }, [jobId, pollMs, attempt]);
 
@@ -93,6 +125,13 @@ function useUsageFetch(enabled: boolean, pollMs: number): UsageState {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async (): Promise<void> => {
+      // Hidden tab: skip the API round-trip, keep the last snapshot.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
       try {
         const next = await api.getUsage();
         if (cancelled) return;
@@ -110,10 +149,15 @@ function useUsageFetch(enabled: boolean, pollMs: number): UsageState {
       }, pollMs);
     };
 
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
     void tick();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      detach();
     };
   }, [enabled, pollMs, attempt]);
 
@@ -135,7 +179,7 @@ export interface JobPostsState {
  * (e.g. signed-out) to skip fetching entirely.
  */
 export function useUsage(options: { pollMs?: number; enabled?: boolean } = {}): UsageState {
-  const { pollMs = 15000, enabled = true } = options;
+  const { pollMs = 30000, enabled = true } = options;
   return useUsageFetch(enabled, pollMs);
 }
 
@@ -151,7 +195,7 @@ export interface ActiveJobsState {
  * while surfacing the error for a retry affordance.
  */
 export function useActiveJobs(options: { pollMs?: number; enabled?: boolean } = {}): ActiveJobsState {
-  const { pollMs = 5000, enabled = true } = options;
+  const { pollMs = 10000, enabled = true } = options;
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -166,6 +210,13 @@ export function useActiveJobs(options: { pollMs?: number; enabled?: boolean } = 
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async (): Promise<void> => {
+      // Hidden tab: skip the API round-trip, keep the last snapshot.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
       try {
         const next = await api.listJobs({ status: "queued,running", page: 1, page_size: 25 });
         if (cancelled) return;
@@ -180,10 +231,15 @@ export function useActiveJobs(options: { pollMs?: number; enabled?: boolean } = 
       }, pollMs);
     };
 
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
     void tick();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      detach();
     };
   }, [enabled, pollMs, attempt]);
 
@@ -202,7 +258,7 @@ export interface AccountsState {
  * management (add/remove) stays on the Saved accounts page.
  */
 export function useAccounts(options: { pollMs?: number; enabled?: boolean } = {}): AccountsState {
-  const { pollMs = 30000, enabled = true } = options;
+  const { pollMs = 60000, enabled = true } = options;
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -217,6 +273,13 @@ export function useAccounts(options: { pollMs?: number; enabled?: boolean } = {}
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async (): Promise<void> => {
+      // Hidden tab: skip the API round-trip, keep the last snapshot.
+      if (!shouldPoll()) {
+        timer = setTimeout(() => {
+          void tick();
+        }, pollMs);
+        return;
+      }
       try {
         const next = await api.listAccounts();
         if (cancelled) return;
@@ -231,10 +294,15 @@ export function useAccounts(options: { pollMs?: number; enabled?: boolean } = {}
       }, pollMs);
     };
 
+    const detach = onBecomeVisible(() => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    });
     void tick();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      detach();
     };
   }, [enabled, pollMs, attempt]);
 

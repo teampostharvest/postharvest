@@ -1,0 +1,40 @@
+{
+  "posts": [
+    {
+      "post_id": "1234567890100_9876543210",
+      "facebook_url": "https://www.facebook.com/NASA",
+      "post_url": "https://www.facebook.com/NASA/posts/9876543210",
+      "page_name": "NASA Lunar Pictures",
+      "page_id": "1234567890100",
+      "profile_url": "https://www.facebook.com/NASA",
+      "post_type": "image",
+      "published_at": "2026-09-20T14:00:00+00:00",
+      "timestamp": 1787310000,
+      "text": "Sample public post text with #hashtag test",
+      "caption": null,
+      "hashtags": ["#hashtag"],
+      "mentions": [],
+      "external_links": [],
+      "likes": 42,
+      "reactions": 42,
+      "comments_count": 3,
+      "shares": 1,
+      "views_count": null,
+      "reaction_like_count": 40,
+      "reaction_love_count": 2,
+      "reaction_care_count": 0,
+      "reaction_haha_count": 0,
+      "reaction_wow_count": 0,
+      "reaction_sad_count": 0,
+      "reaction_angry_count": 0,
+      "media_type": "image",
+      "thumbnail_url": "https://scontent.fhnd1-1.fna.fbcdn.net/v/t1.6435-9/thumb.jpg",
+      "media_url": "https://scontent.fhnd1-1.fna.fbcdn.net/v/t1.6435-9/photo.jpg",
+      "video_url": null,
+      "transcript": null,
+      "transcript_language": null,
+      "scraped_at": "2026-09-21T10:00:00+00:00"
+    }
+  ],
+  "errors": []
+}

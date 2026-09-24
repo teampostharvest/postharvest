@@ -16,10 +16,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.auth.dependencies import get_current_user
+from backend.core import cache, job_state
 from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.core.exceptions import AppError, InvalidInputError, NotFoundError
-from backend.core.job_manager import JobManager
+from backend.core.job_queue import get_job_queue
 from backend.models.errors import ScrapeError
 from backend.models.posts import Post
 from backend.models.scrape_jobs import ScrapeJob
@@ -254,8 +255,9 @@ def delete_job(
     job.cancel_requested = True
     db.commit()
 
-    manager = JobManager.get()
+    manager = get_job_queue()
     manager.cancel(job.id, wait_seconds=get_settings().cancel_wait_seconds)
+    job_state.delete_state(job.id)  # drop the Redis mirror with the rows (§8b)
 
     db.execute(
         delete(ScrapeJob).where(
@@ -263,6 +265,7 @@ def delete_job(
         )
     )
     db.commit()
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return Response(status_code=204)
 
 
@@ -286,7 +289,9 @@ def pause_job(
             code="invalid_state",
         )
     job.status = "paused"
+    job_state.set_status(job.id, "paused")  # Redis mirror (finalplanv2 §8b)
     db.commit()
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return {"job_id": job.id, "status": "paused"}
 
 
@@ -311,10 +316,13 @@ def resume_job(
         )
     job.status = "queued"
     job.cancel_requested = False
+    job_state.clear_cancel(job.id)  # resume clears any Redis cancel flag (§8b)
+    job_state.set_status(job.id, "queued")  # Redis mirror (finalplanv2 §8b)
     db.commit()
     # A bare status flip strands the job: no worker watches the table, so
     # hand it to the pool here (same entry point as a fresh submit).
     from backend.services.job_service import run_scrape_job
 
-    JobManager.get().submit(job.id, run_scrape_job)
+    get_job_queue().submit(job.id, run_scrape_job)
+    cache.invalidate_usage(current_user.id)  # active-job count changed
     return {"job_id": job.id, "status": "queued"}

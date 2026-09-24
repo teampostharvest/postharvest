@@ -8,6 +8,37 @@ from backend.core.logging import get_logger
 
 logger = get_logger("auth.user_service")
 
+#: User fields mirrored into the Redis identity cache. Keep in sync with
+#: ``backend.api.auth.UserOut`` so a cache hit reconstructs a fully-populated
+#: ``User`` (missing attributes would surface as nulls in ``/api/auth/me``).
+_CACHE_FIELDS = (
+    "id",
+    "firebase_uid",
+    "email",
+    "display_name",
+    "photo_url",
+    "plan",
+    "role",
+    "is_active",
+)
+
+
+def serialize_user(user) -> dict:
+    """Flatten a User row into a JSON-safe identity payload."""
+    return {field: getattr(user, field) for field in _CACHE_FIELDS}
+
+
+def user_from_cache(payload: dict):
+    """Rebuild a detached User from a cached identity payload.
+
+    The instance is intentionally transient (never added to a session): every
+    caller only reads identity attributes, and avoiding a DB round-trip is the
+    whole point of the cache.
+    """
+    from backend.models.user import User
+
+    return User(**{field: payload.get(field) for field in _CACHE_FIELDS})
+
 
 def get_or_create_user(db: Session, firebase_uid: str, claims: dict):
     """Find the User by firebase_uid, or create one on first login.

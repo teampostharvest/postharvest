@@ -1,0 +1,11 @@
+{
+  "target_url": "https://www.facebook.com/NASA",
+  "mode": "browser",
+  "account_id": "ops:maverick",
+  "scroll_rounds": 12,
+  "max_posts": 0,
+  "cookies": [
+    "c_user=100000000000001; Domain=.facebook.com; Path=/; HttpOnly",
+    "xs=abc123def456; Domain=.facebook.com; Path=/; Secure; HttpOnly"
+  ]
+}

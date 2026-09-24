@@ -94,6 +94,27 @@ def test_load_cookies_falls_back_to_mirror_when_file_missing():
     assert loaded == _VALID_COOKIES
 
 
+def test_load_cookies_personal_scope_falls_back_to_mirror_when_file_missing(
+    authed_client,
+):
+    """A fresh host can take over a *personal* session from the DB mirror.
+
+    Same shape as the ops fallback above, but for ``scope="me"`` — this is
+    the byte that makes "boot a 2nd VPS, hand it the same framer's login"
+    a hermetic fact: the local file is gone (a brand-new mount has none),
+    yet ``load_cookies`` still returns the saved jar because the DB mirror
+    row is the shared-state leg that survives a host change.
+    """
+    authed_client.get("/api/auth/me")
+    owner_id = _user_id("test_firebase_uid_user_a")
+    save_cookies(list(_VALID_COOKIES), account_name="epsilon", owner_id=owner_id)
+    path = _cookies_path("epsilon", owner_id)
+    assert path.exists()
+    path.unlink()
+    loaded = load_cookies("epsilon", owner_id=owner_id)
+    assert loaded == _VALID_COOKIES
+
+
 def test_delete_account_removes_mirror_row():
     save_cookies(list(_VALID_COOKIES), account_name="delta", owner_id=None)
     assert _mirror("ops", None, "delta") is not None

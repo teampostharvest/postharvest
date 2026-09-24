@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { HoverPeekPanel } from "@/components/common/HoverPeekPanel";
 
@@ -49,9 +49,17 @@ describe("HoverPeekPanel", () => {
     fireEvent.mouseEnter(screen.getByTestId("peek-zone"));
     await screen.findByTestId("ops-panel");
 
+    // The Escape listener only attaches in a passive effect after the open
+    // commit; flush effects so the keydown cannot race ahead of it.
+    await act(async () => {});
+
     fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => {
-      expect(screen.queryByTestId("ops-panel")).not.toBeInTheDocument();
-    });
+    await waitFor(
+      () => {
+        expect(screen.queryByTestId("ops-panel")).not.toBeInTheDocument();
+      },
+      // Exit animation (0.2s) + slow runners; the assertion is unchanged.
+      { timeout: 3000 }
+    );
   });
 });

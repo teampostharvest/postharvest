@@ -7,6 +7,7 @@ import { MotionIcon } from "motion-icons-react";
 import { OpsSidebar } from "@/components/common/OpsSidebar";
 import { HoverPeekPanel } from "@/components/common/HoverPeekPanel";
 import { AvatarMenu } from "@/components/common/AvatarMenu";
+import { UsagePopover } from "@/components/common/UsagePopover";
 import { SignInScreen } from "@/components/views/SignInScreen";
 import { useAuth } from "@/lib/auth-context";
 import { NAV_ITEMS, isActiveHref } from "@/lib/nav-config";
@@ -102,6 +103,7 @@ function TopBar({
         <Link href="/docs" aria-label="Help and docs" title="Help and docs" className={iconButton}>
           <MotionIcon name="BookOpen" size={16} aria-hidden="true" animation="flip" trigger="hover" />
         </Link>
+        {user ? <UsagePopover /> : null}
         <button type="button" onClick={toggleTheme} aria-label="Toggle theme" className={iconButton}>
           {theme === "dark" ? (
             <MotionIcon name="Sun" size={16} aria-hidden="true" animation="spin" trigger="hover" />

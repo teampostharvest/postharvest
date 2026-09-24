@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from backend.core.config import get_settings
 import backend.models  # registers all models on Base.metadata
-from backend.core.database import Base
+from backend.core.database import Base, session_url_for_migrations
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -23,7 +23,8 @@ if config.config_file_name:
 
 settings = get_settings()
 db_url = (settings.supabase_db_url or settings.database_url).strip()
-config.set_main_option("sqlalchemy.url", db_url)
+
+config.set_main_option("sqlalchemy.url", session_url_for_migrations(db_url))
 
 target_metadata = Base.metadata
 
