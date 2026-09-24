@@ -418,7 +418,9 @@ services:
       - web
 
   redis_exporter:
-    image: prom/redis-exporter:v1.61.0
+    # Canonical image: oliver006/redis_exporter. (There is no prom/redis-exporter
+    # on Docker Hub — the prometheus org does not publish it.)
+    image: oliver006/redis_exporter:v1.61.0
     container_name: postharvest-redis-exporter
     profiles: ["mon"]
     restart: unless-stopped
