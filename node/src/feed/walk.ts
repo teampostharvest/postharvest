@@ -85,6 +85,12 @@ export interface FetchFrameOptions {
   bucketKey?: string;
   delaySeconds?: number;
   timeoutSeconds?: number;
+  /** Frame HTTP method (default GET). POST drives GraphQL feed pagination. */
+  method?: "GET" | "POST";
+  /** Form-encoded body fields for POST frames (always string values). */
+  form?: Record<string, string>;
+  /** Referer header for POST frames — the page being walked. */
+  referer?: string;
 }
 
 export interface FeedWalkerDeps {
@@ -94,6 +100,58 @@ export interface FeedWalkerDeps {
 interface InFlight {
   resolve: (frame: FeedFrame) => void;
   reject: (err: unknown) => void;
+}
+
+/**
+ * Build the raw Crawlee request descriptor for one frame.
+ *
+ * Extracted from `fetchFrame` so the POST shape (method, form-encoded payload,
+ * GraphQL-appropriate headers) can be unit-tested without driving Crawlee's
+ * HTTP stack. GET frames keep the document-navigation browser headers;
+ * POST frames switch to cors/same-origin headers (origin: facebook, the page
+ * being walked as referer) — the exact shape the live /api/graphql/ probe
+ * used.
+ */
+export function buildFrameRequest(
+  frameUrl: string,
+  opts: FetchFrameOptions = {},
+): {
+  url: string;
+  method?: "POST";
+  headers: Record<string, string>;
+  payload?: string;
+} {
+  const url = toFacebookUrl(frameUrl);
+  if (opts.method === "POST") {
+    const headers = {
+      "User-Agent": HONEST_USER_AGENT,
+      Accept: "*/*",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: "https://www.facebook.com",
+      Referer: opts.referer ?? "https://www.facebook.com/",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Ch-Ua": '"Chromium";v="128", "Not_A Brand";v="24", "Google Chrome";v="128"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+    };
+    return {
+      url: url.toString(),
+      method: "POST",
+      headers,
+      payload: new URLSearchParams(opts.form ?? {}).toString(),
+    };
+  }
+  return {
+    url: url.toString(),
+    headers: {
+      ...BROWSER_HEADERS,
+      "User-Agent": HONEST_USER_AGENT,
+    },
+  };
 }
 
 export function createFeedWalker(deps: FeedWalkerDeps): FeedWalker {
@@ -200,15 +258,8 @@ export function createFeedWalker(deps: FeedWalkerDeps): FeedWalker {
       inFlight = { resolve, reject };
     });
     try {
-      await crawler.run([
-        {
-          url: url.toString(),
-          headers: {
-            ...BROWSER_HEADERS,
-            "User-Agent": HONEST_USER_AGENT,
-          },
-        },
-      ]);
+      const request = buildFrameRequest(frameUrl, opts);
+      await crawler.run([request]);
     } catch (err) {
       const pending = takeInFlight();
       if (pending) {
