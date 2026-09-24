@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/teampostharvest/postharvest/compare/v1.5.0...v1.5.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **obs:** use canonical oliver006/redis_exporter image for the redis metrics exporter ([ff69c0c](https://github.com/teampostharvest/postharvest/commit/ff69c0c0d1f3b81bb04c334d3b23d6d41067932a))
+
 # [1.5.0](https://github.com/teampostharvest/postharvest/compare/v1.4.0...v1.5.0) (2026-09-24)
 
 
