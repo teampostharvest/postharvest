@@ -50,7 +50,7 @@ from .errors import (
 )
 from .fetcher import Fetcher
 from .normalizer import NORMALIZED_KEYS, normalize_post
-from .parser import parse_page
+from .parser import ParsedPage, parse_page
 from .stats import Stats
 from .url_validator import validate_or_raise
 
@@ -356,66 +356,87 @@ def scrape_source(
     # -- 2. fetch + parse --------------------------------------------------
     try:
         emit("fetching")
-        logger.info("Starting fetch for %s", url)
-        fetcher = Fetcher(
-            cancel_event=cancel_event,
-            delay=options.delay,
-            proxy_url=options.proxy_url,
-        )
-        try:
-            # finalplanv2 §14: when USE_NODE is on, HTTP-mode fetches
-            # are delegated to the node service (robots/throttle/retry
-            # happen there); the flag-off path below is byte-for-byte the
-            # legacy Fetcher. Parsing/normalization/dedup are identical for
-            # both paths.
-            if _node_enabled():
-                cached_fetch = _ttl_consult(normalized_url)
-                if cached_fetch is not None:
-                    # C: identical scrape within the TTL window is served
-                    # byte-equal from the hermetic runtime cache — the node
-                    # seam is NOT re-visited (byte: ``== 1`` across two
-                    # identical ``scrape_source`` calls).
-                    fetch = cached_fetch
-                else:
-                    fetch = _node_fetch_page(normalized_url, cancel_event)
-                    _ttl_store(normalized_url, fetch)
-            else:
-                fetch = fetcher.fetch_page(normalized_url)
-            logger.info(
-                "Fetched %s variant=%s status=%s final_url=%s bytes=%d",
-                url, fetch.variant, fetch.status_code,
-                fetch.final_url, len(fetch.html),
+        if _feed_walk_enabled():
+            # GUEST_FEED_WALK: the whole feed is walked via node's Crawlee
+            # transport — frame 1 GET (embeds the GraphQL bootstrap) then
+            # guest POST frames to /api/graphql/ with an advancing cursor.
+            # Robots/throttle/TTL/go-worker are bypassed by design: node owns
+            # transport pacing/rotation and parsing stays Python-side (see
+            # backend/services/node_feed.py).  The walk result is shaped as a
+            # ParsedPage so the shared normalize/filter/dedup/cap loop below
+            # runs byte-unchanged.
+            logger.info("Walking %s via node feed transport", url)
+            page = _walk_source_page(
+                normalized_url,
+                handle=_handle_of(normalized_url),
+                cancel_event=cancel_event,
             )
             emit("parsing")
-            if _go_worker_enabled():
-                # M7 seam: the go worker owns the compute slice
-                # (parse -> normalize -> dedup, byte-equal to this pipeline —
-                # proven by the golang httpapi goldens).  Filters + max_posts
-                # cap stay here; all bookkeeping after this point lives in
-                # _finish_source_via_go.  TTL-cache consult/store above wrap
-                # the FETCH only, exactly as on the legacy path.
-                go = _go_worker_parse(
-                    fetch.html,
-                    normalized_url,
-                    handle=_handle_of(normalized_url),
-                    idempotency_key=idempotency_key,
-                    cancel_event=cancel_event,
-                )
-                return _finish_source_via_go(
-                    url, go, options, stats, errors_list,
-                    handle_counter, emit, cancel_event,
-                )
-            page = parse_page(
-                fetch.html,
-                page_url=fetch.final_url,
-                handle=_handle_of(normalized_url),
-            )
             logger.info(
-                "Parsed %s: page_name=%r, posts=%d, post_errors=%d",
-                url, page.page_name, len(page.posts), len(page.post_errors),
+                "Walked %s: page_name=%r, posts=%d",
+                url, page.page_name, len(page.posts),
             )
-        finally:
-            fetcher.close()
+        else:
+            logger.info("Starting fetch for %s", url)
+            fetcher = Fetcher(
+                cancel_event=cancel_event,
+                delay=options.delay,
+                proxy_url=options.proxy_url,
+            )
+            try:
+                # finalplanv2 §14: when USE_NODE is on, HTTP-mode fetches
+                # are delegated to the node service (robots/throttle/retry
+                # happen there); the flag-off path below is byte-for-byte the
+                # legacy Fetcher. Parsing/normalization/dedup are identical for
+                # both paths.
+                if _node_enabled():
+                    cached_fetch = _ttl_consult(normalized_url)
+                    if cached_fetch is not None:
+                        # C: identical scrape within the TTL window is served
+                        # byte-equal from the hermetic runtime cache — the node
+                        # seam is NOT re-visited (byte: ``== 1`` across two
+                        # identical ``scrape_source`` calls).
+                        fetch = cached_fetch
+                    else:
+                        fetch = _node_fetch_page(normalized_url, cancel_event)
+                        _ttl_store(normalized_url, fetch)
+                else:
+                    fetch = fetcher.fetch_page(normalized_url)
+                logger.info(
+                    "Fetched %s variant=%s status=%s final_url=%s bytes=%d",
+                    url, fetch.variant, fetch.status_code,
+                    fetch.final_url, len(fetch.html),
+                )
+                emit("parsing")
+                if _go_worker_enabled():
+                    # M7 seam: the go worker owns the compute slice
+                    # (parse -> normalize -> dedup, byte-equal to this pipeline —
+                    # proven by the golang httpapi goldens).  Filters + max_posts
+                    # cap stay here; all bookkeeping after this point lives in
+                    # _finish_source_via_go.  TTL-cache consult/store above wrap
+                    # the FETCH only, exactly as on the legacy path.
+                    go = _go_worker_parse(
+                        fetch.html,
+                        normalized_url,
+                        handle=_handle_of(normalized_url),
+                        idempotency_key=idempotency_key,
+                        cancel_event=cancel_event,
+                    )
+                    return _finish_source_via_go(
+                        url, go, options, stats, errors_list,
+                        handle_counter, emit, cancel_event,
+                    )
+                page = parse_page(
+                    fetch.html,
+                    page_url=fetch.final_url,
+                    handle=_handle_of(normalized_url),
+                )
+                logger.info(
+                    "Parsed %s: page_name=%r, posts=%d, post_errors=%d",
+                    url, page.page_name, len(page.posts), len(page.post_errors),
+                )
+            finally:
+                fetcher.close()
     except OperationCancelled as exc:
         errors_list.append({"url": url, "code": exc.code, "message": exc.message})
         emit("failed")
@@ -527,6 +548,62 @@ def _node_enabled() -> bool:
     """True when HTTP-mode fetches should be delegated to node."""
     from backend.core.config import get_settings
     return get_settings().use_node
+
+
+def _feed_walk_enabled() -> bool:
+    """True when the cookie-less GraphQL feed walk replaces fetch+parse.
+
+    The GUEST_FEED_WALK flag turns on the node feed-walk seam
+    (:func:`_walk_source_page`): frame 1 is a GET of the page (which embeds
+    the GraphQL bootstrap: queryID + preloader variables + initial cursor)
+    and every later frame is a guest POST to ``/api/graphql/`` with an
+    advancing cursor.  Node owns transport/rotation; parsing stays Python-side
+    (``backend/scraper/parser.py``).
+    """
+    from backend.core.config import get_settings
+    return get_settings().guest_feed_walk
+
+
+def _walk_source_page(
+    normalized_url: str,
+    *,
+    handle: Optional[str],
+    max_rounds: int = 40,
+    cancel_event: Optional[threading.Event] = None,
+) -> ParsedPage:
+    """GUEST_FEED_WALK seam: walk a public page feed via node.
+
+    Replaces the fetch+parse slice of ``scrape_source`` with the node
+    feed-walk (Crawlee transport + Python parsing — see
+    ``backend/services/node_feed.py`` for the full mechanism).  The walk
+    result is shaped back into a :class:`ParsedPage` so the shared
+    normalize/filter/dedup/cap loop below runs unchanged.
+
+    * Walk stops on ``has_next_page: false`` (or the max_rounds safety cap).
+    * ``fetch_error`` re-raises the underlying ScraperError (taxonomy
+      preserved: RateLimited / PageUnavailable / Timeout / ...).
+    * ``cancelled`` raises :class:`OperationCancelled` — same bookkeeping as
+      a fetch-phase cancel on the legacy path (error entry + failed emit),
+      not a silent partial walk.
+    """
+    from backend.services.node_feed import walk_feed_via_node  # lazy (cycle)
+
+    result = walk_feed_via_node(
+        normalized_url,
+        handle=handle,
+        max_rounds=max_rounds,
+        cancel_event=cancel_event,
+    )
+    if result.stop_reason == "cancelled":
+        raise OperationCancelled()
+    meta = result.meta or {}
+    return ParsedPage(
+        page_name=meta.get("page_name"),
+        page_id=meta.get("page_id"),
+        profile_url=meta.get("profile_url"),
+        posts=list(result.items),
+        fetched_url=normalized_url,
+    )
 
 
 def _node_fetch_page(normalized_url: str,
