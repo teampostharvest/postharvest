@@ -1,3 +1,15 @@
+# [1.4.0](https://github.com/teampostharvest/postharvest/compare/v1.3.0...v1.4.0) (2026-09-24)
+
+
+### Bug Fixes
+
+* **capture:** push-stream viewer + session seeding so live capture completes fast ([c15139c](https://github.com/teampostharvest/postharvest/commit/c15139ca3f2594adf6e269b29e0442fc929db184))
+
+
+### Features
+
+* **obs:** metrics endpoints on backend, go and node (observability, part 1) ([480c57f](https://github.com/teampostharvest/postharvest/commit/480c57f0f6a76dd4401a21989991fa20ea5f178a))
+
 # [1.3.0](https://github.com/teampostharvest/postharvest/compare/v1.2.0...v1.3.0) (2026-09-24)
 
 
