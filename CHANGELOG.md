@@ -1,3 +1,32 @@
+# [1.3.0](https://github.com/teampostharvest/postharvest/compare/v1.2.0...v1.3.0) (2026-09-24)
+
+
+### Bug Fixes
+
+* **api:** cache identity and accounts, rebalance pools against exhaustion ([8c417b3](https://github.com/teampostharvest/postharvest/commit/8c417b3f05d5cd86a7d9942961ae44d2812a7c1a))
+* **api:** stop postgres pool exhaustion on remote reads ([69a8650](https://github.com/teampostharvest/postharvest/commit/69a865071d7f5581fc49f7cff2220df93029c944))
+* **golang:** vendor redis maintnotifications/logs for offline build ([7d434d4](https://github.com/teampostharvest/postharvest/commit/7d434d4a071c72da5074de08580957dc22829baa))
+* **test:** flush passive effects before Escape in HoverPeekPanel dismissal test ([10cb4df](https://github.com/teampostharvest/postharvest/commit/10cb4df78dd10ac2f32b568aceb6a3716444fddb))
+
+
+### Features
+
+* **accounts:** import sessions from cookies.txt paste ([efeb5db](https://github.com/teampostharvest/postharvest/commit/efeb5db846efd303422203f1c31d63fbb2caa3c5))
+* **browser-seam:** route browser scrapes through node behind USE_NODE_BROWSER ([31f4bf8](https://github.com/teampostharvest/postharvest/commit/31f4bf8f64cb8681ba9632704c691db52f8ddc2e))
+* **cache:** production arming path for runtime TTL consult seam ([6b0fd17](https://github.com/teampostharvest/postharvest/commit/6b0fd17fe5f5b7525bca0638831e5ec012162259))
+* **contract:** add browser-mode fields to FetchRequest/FetchResponse ([2eac010](https://github.com/teampostharvest/postharvest/commit/2eac010ec8cd6b83c5cf698951b4fe3cb7a642ac))
+* **contract:** add canonical postharvest proto and fixtures ([04c0479](https://github.com/teampostharvest/postharvest/commit/04c047996e8a6429b4400df77d26c1d70f0ef72f))
+* **db:** size postgres client pool by process role ([85bfb61](https://github.com/teampostharvest/postharvest/commit/85bfb6195085e6a4a0db1250b6a388dda3fdd653))
+* **jobs:** add arq execution seam and out-of-process worker ([e4dea54](https://github.com/teampostharvest/postharvest/commit/e4dea54ddd9564d4af9477041f6f9475b40ab014))
+* **jobs:** externalize job-state to redis (phase 1 part 1) ([008fb8c](https://github.com/teampostharvest/postharvest/commit/008fb8c40c8f230c35524315e24853e9b4a1df8c))
+* **node-fetcher:** scaffold Fastify fetch service with http mode ([4b6a0eb](https://github.com/teampostharvest/postharvest/commit/4b6a0ebac981715ab9761dc67e7c3a6b56db25bc))
+* **node:** add HTTP fetch seam behind flag and rename node-fetcher to node ([def9141](https://github.com/teampostharvest/postharvest/commit/def914149b1751e21cd92dc7edb3069a9210bb8e))
+* **node:** browser-mode capture via Playwright with session cookies ([552a38c](https://github.com/teampostharvest/postharvest/commit/552a38ce055aa0e0dc60727f4ed0909988a67fba))
+* **node:** discover system Chromium in production browser open ([66ab7b0](https://github.com/teampostharvest/postharvest/commit/66ab7b0e9eac99f37736343b56222dbbc6cc889a))
+* **node:** slice C refreshed-session write-back + hermetic seam (incl. falsy persist-gate closures) ([08126da](https://github.com/teampostharvest/postharvest/commit/08126da25003ceafcdfdd59c0737ea2fbf49e860))
+* seal slices D/B/C/A — Redis intel, mirror fallback, TTL cache, Go worker ([da9da95](https://github.com/teampostharvest/postharvest/commit/da9da956dbdfe29a6217052547b7e208870ee36a))
+* **usage:** top-bar usage pill + expandable popover (theme tokens, AA contrast) ([6b15e72](https://github.com/teampostharvest/postharvest/commit/6b15e720a960c7947675c2b15ffbf4ba71d96b8c))
+
 # [1.2.0](https://github.com/teampostharvest/postharvest/compare/v1.1.0...v1.2.0) (2026-09-21)
 
 
