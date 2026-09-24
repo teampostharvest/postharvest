@@ -402,9 +402,11 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/postharvest-overview.json
-      # Provisioned alert contact point (D17). Empty => rules still exist but
-      # notifications are inert until a real URL is configured.
-      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-}
+      # Provisioned alert contact point (D17). Empty => the container gets a
+      # dead-end discard URL (port 9) so the webhook validates and alert rules
+      # provision; notifications only reach somewhere real once an operator
+      # sets GRAFANA_ALERT_WEBHOOK_URL in docker/.env.
+      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-http://127.0.0.1:9/discard}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
