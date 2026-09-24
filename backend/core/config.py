@@ -186,6 +186,14 @@ class Settings(BaseSettings):
     # network (see docker/docker-compose.yml backend environment).
     node_base_url: str = "http://127.0.0.1:9334"
 
+    # --- guest feed-walk seam (Crawlee, refactor/apify) ------------------
+    # When ON, the scraper walks public page feeds via the node service's
+    # Crawlee feed transport (POST /feed-fetch): raw HTML frames with
+    # session-pool rotation on block, parsed in Python. OFF by default —
+    # the legacy one-shot HTTP path stays the default until the walk
+    # proves out live (yield target: 50-100 posts/source).
+    guest_feed_walk: bool = False
+
     # --- go compute seam (finalplanv2 §5 "Go (Compute)" / §14 strangler) --
     # When ON, HTTP-mode scrapes delegate the compute slice
     # (parse -> normalize -> dedup) to the go worker's Phase-1 Parse RPC
