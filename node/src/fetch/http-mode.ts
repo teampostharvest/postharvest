@@ -237,7 +237,7 @@ function undiciTransport(
   }));
 }
 
-function toFacebookUrl(targetUrl: string): URL {
+export function toFacebookUrl(targetUrl: string): URL {
   let url: URL;
   try {
     url = new URL(targetUrl);
