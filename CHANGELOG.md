@@ -1,3 +1,10 @@
+## [1.5.2](https://github.com/teampostharvest/postharvest/compare/v1.5.1...v1.5.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **obs:** flat alerting provisioning layout + cadvisor healthcheck URL ([a1fca4f](https://github.com/teampostharvest/postharvest/commit/a1fca4f0640a83ad65e05af732f130ef599a5d6f))
+
 ## [1.5.1](https://github.com/teampostharvest/postharvest/compare/v1.5.0...v1.5.1) (2026-09-24)
 
 
