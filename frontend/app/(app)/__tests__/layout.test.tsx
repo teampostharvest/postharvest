@@ -27,6 +27,10 @@ vi.mock("@/components/common/AvatarMenu", () => ({
   AvatarMenu: () => null,
 }));
 
+vi.mock("@/components/common/UsagePopover", () => ({
+  UsagePopover: () => <div data-testid="usage-popover" />,
+}));
+
 vi.mock("@/components/views/SignInScreen", () => ({
   SignInScreen: () => <div data-testid="sign-in" />,
 }));
@@ -69,6 +73,8 @@ describe("AppShellLayout", () => {
     // Public content still renders, with Sign In in the top bar.
     expect(screen.getByText("child")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign In" })).toBeInTheDocument();
+    // The usage pill is session chrome — nothing for logged-out visitors.
+    expect(screen.queryByTestId("usage-popover")).not.toBeInTheDocument();
     // The wordmark is the single home affordance — no duplicate Home link.
     expect(screen.getByRole("link", { name: "PostHarvest home" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("link", { name: "Home" })).not.toBeInTheDocument();
@@ -90,6 +96,8 @@ describe("AppShellLayout", () => {
     );
 
     expect(screen.getByTestId("ops-sidebar")).toBeInTheDocument();
+    // Signed-in users get the usage pill in the top bar.
+    expect(screen.getByTestId("usage-popover")).toBeInTheDocument();
   });
 
   it("keeps the toggle in the top bar at the same spot when collapsed", () => {

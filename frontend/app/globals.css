@@ -102,6 +102,21 @@
   --color-badge-warn: var(--badge-warn);
   --color-badge-warn-fg: var(--badge-warn-fg);
 
+  /* Usage popover (plans/usagecomp.md) — bounded/unbounded value tones. */
+  --color-usage-bg: var(--usage-bg);
+  --color-usage-border: var(--usage-border);
+  --color-usage-title: var(--usage-title);
+  --color-usage-label: var(--usage-label);
+  --color-usage-healthy: var(--usage-value-healthy);
+  --color-usage-warning: var(--usage-value-warning);
+  --color-usage-exhausted: var(--usage-value-exhausted);
+  --color-usage-unbounded: var(--usage-value-unbounded);
+  --color-usage-footer: var(--usage-footer);
+  --color-usage-close-hover: var(--usage-close-hover);
+  --color-usage-refresh: var(--usage-refresh);
+  --color-usage-refresh-hover: var(--usage-refresh-hover);
+  --color-usage-refresh-loading: var(--usage-refresh-loading);
+
   /* ---- Radius (plans/ui.md §5.2) -------------------------------------- */
   --radius: 10px;
   --radius-sm: 6px;
@@ -301,6 +316,24 @@
     --badge-ok-fg: var(--success);
     --badge-warn: var(--warning-bg);
     --badge-warn-fg: var(--warning);
+
+    /* Usage popover (plans/usagecomp.md §"Light mode"). The plan-specified
+       #8F8B80 footer / #78746A label / #3F8452 healthy / #B8862E warning
+       fail WCAG AA 4.5:1 on the #FBFAF6 surface; these hue-preserving
+       darker variants pass (verified by lib/__tests__/usage-contrast.test.ts). */
+    --usage-bg: #fbfaf6;
+    --usage-border: #e8e4d9;
+    --usage-title: #1a1917;
+    --usage-label: #716c60;
+    --usage-value-healthy: #3a794b;
+    --usage-value-warning: #8a6523;
+    --usage-value-exhausted: #716c60;
+    --usage-value-unbounded: #1a1917;
+    --usage-footer: #6b675e;
+    --usage-close-hover: #efebe0;
+    --usage-refresh: #716c60;
+    --usage-refresh-hover: #1a1917;
+    --usage-refresh-loading: #8a6523;
   }
 
   .dark,
@@ -361,6 +394,23 @@
     --badge-ok-fg: var(--success);
     --badge-warn: var(--warning-bg);
     --badge-warn-fg: var(--warning);
+
+    /* Usage popover (plans/usagecomp.md §"Dark mode"). The plan-specified
+       #6B675E footer fails WCAG AA 4.5:1 on the #151412 surface and had to
+       be lightened to #857F73 (still dimmer than the #8A8578 row labels). */
+    --usage-bg: #151412;
+    --usage-border: #232323;
+    --usage-title: #f3f0e8;
+    --usage-label: #8a8578;
+    --usage-value-healthy: #7fb88a;
+    --usage-value-warning: #e8b94d;
+    --usage-value-exhausted: #8a8578;
+    --usage-value-unbounded: #f3f0e8;
+    --usage-footer: #857f73;
+    --usage-close-hover: #1e1d1a;
+    --usage-refresh: #8a8578;
+    --usage-refresh-hover: #f3f0e8;
+    --usage-refresh-loading: #e8b94d;
 
     /* Floating/resting shadows deepen on carbon. */
     --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.25);
