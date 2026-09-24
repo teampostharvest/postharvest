@@ -479,6 +479,10 @@ services:
     restart: unless-stopped
     init: true
     privileged: true
+    environment:
+      # cadvisor's image-baked healthcheck wgets $CADVISOR_HEALTHCHECK_URL;
+      # point it at the non-default port we run on (--port=8090).
+      CADVISOR_HEALTHCHECK_URL: http://127.0.0.1:8090/healthz
     command:
       - --port=8090
       - --housekeeping_interval=10s
