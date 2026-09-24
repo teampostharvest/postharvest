@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/teampostharvest/postharvest/compare/v1.6.0...v1.6.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **node:** keep Crawlee feed-walk storage on tmpfs for read-only prod ([8847ef4](https://github.com/teampostharvest/postharvest/commit/8847ef4d538b2b5c344d1591a5f12473b609f28e))
+
 # [1.6.0](https://github.com/teampostharvest/postharvest/compare/v1.5.3...v1.6.0) (2026-09-24)
 
 

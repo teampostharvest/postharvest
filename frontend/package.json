@@ -1,6 +1,6 @@
 {
     "name": "postharvest-frontend",
-    "version": "1.6.0",
+    "version": "1.6.1",
     "private": true,
     "description": "Dashboard UI for the PostHarvest — public posts extraction with progress tracking, preview and JSON/CSV/Excel export.",
     "scripts": {
