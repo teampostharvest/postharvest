@@ -13,5 +13,5 @@ Planned contents (populated as the deployment matures):
 | `VPS.md` | Provisioning runbook: install Docker, clone, `.env` setup, first boot | TODO |
 | `backup.md` | `pg_dump` cron + `data/` (cookies/exports) backup strategy | TODO |
 
-See [DECISIONS.md](../DECISIONS.md) D8 for the split rationale and O1/O4 for
+See [DECISIONS.md](../docs/DECISIONS.md) D8 for the split rationale and O1/O4 for
 the open choices before these get written.

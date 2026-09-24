@@ -1,0 +1,60 @@
+# Prometheus scrape configuration (plans/monitoring.md, D13/D14).
+#
+# Scrape targets are compose service names on the stack networks. Prometheus
+# joins BOTH `web` and `isolated` so one instance reaches every /metrics in
+# the stack. Nothing here is reachable from outside: no port is published
+# (D15), and nginx never proxies any /metrics path (D16).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    site: postharvest
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # backend — FastAPI (web network); postharvest_http_* + scrape/redis counters.
+  - job_name: backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]
+
+  # node — facebook-facing fetch service (web network).
+  - job_name: node
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["node:9334"]
+
+  # go — compute worker (isolated network only; reached via prometheus's
+  # second interface).
+  - job_name: go
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["go:8080"]
+
+  # redis — via the exporter (isolated network).
+  - job_name: redis
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["redis_exporter:9121"]
+
+  # nginx — via the exporter consuming stub_status (web network).
+  - job_name: nginx
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["nginx_exporter:9113"]
+
+  # host metrics (web network; container with host /proc,/sys,root binds).
+  - job_name: node_exporter
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["node_exporter:9100"]
+
+  # container metrics (web network).
+  - job_name: cadvisor
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["cadvisor:8090"]
