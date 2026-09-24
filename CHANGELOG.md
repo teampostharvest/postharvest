@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/teampostharvest/postharvest/compare/v1.4.0...v1.5.0) (2026-09-24)
+
+
+### Features
+
+* **obs:** monitoring platform — prometheus, grafana, exporters, dashboards, alerting (D13–D17) ([da4f852](https://github.com/teampostharvest/postharvest/commit/da4f852556c7dce00b6f74273dd33575d86dd200))
+
 # [1.4.0](https://github.com/teampostharvest/postharvest/compare/v1.3.0...v1.4.0) (2026-09-24)
 
 
