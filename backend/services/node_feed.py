@@ -487,6 +487,13 @@ class FeedWalkAdapter:
         )
         parsed = self._parse(frame.html, page_url=frame.final_url, handle=self._handle)
 
+        # Page identity comes from frame 1's parse (og:title/profile url);
+        # it is stamped into every round's meta so the walk's final
+        # PaginationResult.meta carries it (paginate keeps the last round's).
+        self._page_name = parsed.page_name
+        self._page_id = parsed.page_id
+        self._profile_url = parsed.profile_url
+
         # GraphQL walk continues when frame 1 embeds a feed bootstrap.
         bootstrap = extract_feed_bootstrap(frame.html)
         next_cursor = _gql_spec(bootstrap, bootstrap.end_cursor) if bootstrap else None
@@ -495,13 +502,7 @@ class FeedWalkAdapter:
             items=list(parsed.posts) if parsed.posts else [],
             next_cursor=next_cursor,
             has_more=next_cursor is not None,
-            meta={
-                "frame_status": frame.status_code,
-                "final_url": frame.final_url,
-                "blocked": frame.blocked,
-                "session_id": frame.session_id,
-                "posts": len(parsed.posts),
-            },
+            meta=self._round_meta(frame, len(parsed.posts)),
         )
 
     def _fetch_graphql_frame(self, spec: Dict[str, Any]) -> PageResult:
@@ -525,14 +526,26 @@ class FeedWalkAdapter:
             items=list(posts),
             next_cursor=next_cursor,
             has_more=next_cursor is not None,
-            meta={
-                "frame_status": frame.status_code,
-                "final_url": frame.final_url,
-                "blocked": frame.blocked,
-                "session_id": frame.session_id,
-                "posts": len(posts),
-            },
+            meta=self._round_meta(frame, len(posts)),
         )
+
+    def _round_meta(self, frame: FeedFrame, posts: int) -> dict:
+        """Meta stamped on every round's PageResult.
+
+        ``page_name``/``page_id``/``profile_url`` are captured from frame 1
+        and carried forward so the walk's final PaginationResult.meta keeps
+        page identity even when the last round is a GraphQL frame.
+        """
+        return {
+            "frame_status": frame.status_code,
+            "final_url": frame.final_url,
+            "blocked": frame.blocked,
+            "session_id": frame.session_id,
+            "posts": posts,
+            "page_name": getattr(self, "_page_name", None),
+            "page_id": getattr(self, "_page_id", None),
+            "profile_url": getattr(self, "_profile_url", None),
+        }
 
 
 def walk_feed_via_node(
