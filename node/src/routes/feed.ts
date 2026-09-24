@@ -63,11 +63,54 @@ export function registerFeedRoutes(
         );
       }
 
+      // -- method / form / referer (POST GraphQL pagination frames) -----
+      const method =
+        typeof body.method === "string" ? body.method.toUpperCase() : "GET";
+      if (method !== "GET" && method !== "POST") {
+        return sendError(
+          reply,
+          400,
+          "invalid_request",
+          "method must be GET or POST",
+        );
+      }
+      let form: Record<string, string> | undefined;
+      if (body.form !== undefined && body.form !== null) {
+        if (method !== "POST") {
+          return sendError(
+            reply,
+            400,
+            "invalid_request",
+            "form is only valid for POST frames",
+          );
+        }
+        if (
+          typeof body.form !== "object" ||
+          Array.isArray(body.form) ||
+          Object.values(body.form).some((v) => typeof v !== "string")
+        ) {
+          return sendError(
+            reply,
+            400,
+            "invalid_request",
+            "form must be an object of string values",
+          );
+        }
+        form = body.form as Record<string, string>;
+      }
+      const referer =
+        typeof body.referer === "string" && body.referer.trim() !== ""
+          ? body.referer
+          : undefined;
+
       let frame: FeedFrame;
       try {
         frame = await deps.walker.fetchFrame(parsed.toString(), {
           limiter: deps.limiter,
           bucketKey: `host:${host}`,
+          method: method === "POST" ? "POST" : "GET",
+          form,
+          referer,
         });
       } catch (err) {
         if (err instanceof FetchError) {

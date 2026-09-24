@@ -11,11 +11,26 @@
 export interface FeedFrameRequest {
   target_url: string;
   /**
-   * Opaque frame cursor (Phase 2: next-frame URL / page token). Absent or
-   * null == the first frame of the walk. Accepted for forward-compat; the
-   * walker ignores it until the cursor mechanism lands.
+   * Opaque frame cursor (a JSON frame spec, see backend/services/node_feed.py).
+   * Absent or null == the first frame of the walk. Passed through verbatim —
+   * node never interprets it (parsing stays in Python).
    */
   cursor?: string | null;
+  /**
+   * HTTP method for this frame. GET (default) fetches a page; POST drives the
+   * GraphQL /api/graphql/ pagination frames (form-encoded body below).
+   */
+  method?: "GET" | "POST";
+  /**
+   * Form-encoded body fields (POST frames only), e.g. doc_id + the GraphQL
+   * variables JSON. Values are always strings.
+   */
+  form?: Record<string, string>;
+  /**
+   * Referer header for POST frames — the page being walked (telling the
+   * GraphQL endpoint which profile timeline the pagination belongs to).
+   */
+  referer?: string;
 }
 
 /** node -> FastAPI: one frame, raw bytes only. */
