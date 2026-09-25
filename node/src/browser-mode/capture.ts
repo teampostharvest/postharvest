@@ -380,6 +380,7 @@ export async function captureFeed(
     }
 
     const current = domPool.length + scriptPool.length + graphqlPostIds.size;
+    postsFoundTotal = Math.max(postsFoundTotal, current);
     const deficit = Math.max(0, (maxPosts || 9999) - current);
     const staleLimit = maxPosts ? Math.max(8, Math.min(deficit, 16)) : 10;
 
@@ -394,7 +395,6 @@ export async function captureFeed(
       }
     } else {
       staleRounds = 0;
-      postsFoundTotal = Math.max(postsFoundTotal, current);
     }
 
     if (maxPosts && domPool.length + graphqlPostIds.size >= maxPosts) {

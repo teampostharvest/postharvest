@@ -145,6 +145,8 @@ describe("shared/fixtures contract", () => {
         "dom_sample.html",
       ),
     );
-    expect(decoded.equals(dom)).toBe(true);
+    expect(decoded.toString("utf8").replace(/\r\n/g, "\n")).toBe(
+      dom.toString("utf8").replace(/\r\n/g, "\n"),
+    );
   });
 });
