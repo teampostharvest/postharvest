@@ -127,6 +127,10 @@ services:
       # browser_scraper (independent of USE_NODE).
       USE_NODE_BROWSER: ${USE_NODE_BROWSER:-0}
       NODE_BASE_URL: ${NODE_BASE_URL:-http://node:9334}
+      # Cookie-less GraphQL feed walk (finalplanv2 §14): when GUEST_FEED_WALK=1
+      # the backend walks public pages via node's Crawlee feed frames instead
+      # of fetch+parse (guest requests only — no saved accounts involved).
+      GUEST_FEED_WALK: ${GUEST_FEED_WALK:-0}
       # go compute seam (finalplanv2 §5/§14, M7): when USE_GO_WORKER=1 the
       # backend delegates the compute slice (parse -> normalize -> dedup) to
       # the go worker's POST /v1/parse.  Stays 0 by default — flips only
@@ -306,6 +310,10 @@ services:
       SCRAPER_TIMEOUT_SECONDS: ${SCRAPER_TIMEOUT_SECONDS:-20}
       SCRAPER_MAX_RETRIES: ${SCRAPER_MAX_RETRIES:-3}
       SCRAPER_ROBOTS: ${SCRAPER_ROBOTS:-1}
+      # Crawlee feed-walk storage: the prod container is read-only root with
+      # tmpfs /tmp — keep Crawlee's request-queue/session scratch on tmpfs
+      # (ephemeral by design; a restart starts a fresh walk).
+      CRAWLEE_STORAGE_DIR: ${CRAWLEE_STORAGE_DIR:-/tmp/crawlee-storage}
     # Only service_started (not healthy): the fetcher must never hard-block on
     # Redis — it degrades to in-process buckets and /readyz reports the gap.
     depends_on:

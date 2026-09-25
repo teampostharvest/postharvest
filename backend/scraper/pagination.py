@@ -134,7 +134,11 @@ def paginate(
                 total_rounds=round_num,
                 stop_reason="fetch_error",
                 last_cursor=cursor,
-                meta={"error": str(exc)},
+                # The raw exception is kept alongside the string so callers that
+                # need the underlying taxonomy (the feed-walk seam re-raising a
+                # ScraperError) can recover it; ``error`` stays a plain string
+                # for callers that just report it.
+                meta={"error": str(exc), "error_exc": exc},
             )
 
         pages_fetched += 1

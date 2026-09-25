@@ -10,10 +10,12 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { loadConfig, type Config } from "./config.js";
 import { registerHealthRoutes } from "./health.js";
 import { registerFetchRoutes } from "./routes/fetch.js";
+import { registerFeedRoutes } from "./routes/feed.js";
 import { closeRedis, getRedis, type RedisClient } from "./redis.js";
 import { LocalTokenBucket, RedisTokenBucket, type Bucket } from "./fetch/rate-limiter.js";
 import { RobotsTxtPolicy, type RobotsPolicy } from "./fetch/robots.js";
 import { fetchPage, type FetchPageOptions, type FetchResult } from "./fetch/http-mode.js";
+import { createFeedWalker, type FeedWalker } from "./feed/walk.js";
 import type { BrowserOpenFn } from "./browser-mode/types.js";
 import { registerMetricsHooks } from "./metrics.js";
 
@@ -24,12 +26,15 @@ export interface BuildAppOptions {
   robots?: RobotsPolicy;
   fetchImpl?: (url: string, opts: FetchPageOptions) => Promise<FetchResult>;
   browserOpen?: BrowserOpenFn;
+  /** Real default = a Crawlee HttpCrawler + SessionPool; tests inject a stub. */
+  feedWalker?: FeedWalker;
 }
 
 export interface BuiltApp {
   app: FastifyInstance;
   config: Config;
   redis: RedisClient | null;
+  feedWalker: FeedWalker;
 }
 
 export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
@@ -71,13 +76,15 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     fetchImpl: opts.fetchImpl,
     browserOpen: opts.browserOpen,
   });
+  const feedWalker = opts.feedWalker ?? createFeedWalker({ config });
+  registerFeedRoutes(app, { config, limiter, walker: feedWalker });
   registerMetricsHooks(app);
 
-  return { app, config, redis };
+  return { app, config, redis, feedWalker };
 }
 
 export async function start(): Promise<void> {
-  const { app, config, redis } = buildApp();
+  const { app, config, redis, feedWalker } = buildApp();
   try {
     await app.listen({ host: config.host, port: config.port });
     app.log.info(
@@ -93,6 +100,7 @@ export async function start(): Promise<void> {
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, "shutting down");
     await app.close();
+    await feedWalker.close();
     await closeRedis();
     process.exit(0);
   };
