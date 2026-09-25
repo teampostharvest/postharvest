@@ -42,6 +42,7 @@ export interface BrowserCaptureStats {
   loginWall: boolean;
   feedMissing: boolean;
   postsFound: number;
+  stopReason?: string;
 }
 
 export interface BrowserCaptureResult {
@@ -49,7 +50,6 @@ export interface BrowserCaptureResult {
   finalUrl: string;
   stats: BrowserCaptureStats;
 }
-
 // ---------------------------------------------------------------------------
 // In-page extraction scripts. These run inside Chromium (page.evaluate) and
 // mirror find_post_roots / the script-blob collector from parser.py. The
@@ -84,6 +84,7 @@ declare const document: {
 declare const window: {
   readonly location: { readonly href: string };
   scrollTo(x: number, y: number): void;
+  scrollBy(x: number, y: number): void;
 };
 
 export type RootCandidate = { html: string; text: string; aria: string };
@@ -236,24 +237,19 @@ async function collectFeedResponse(
   seenIds: Set<string>,
 ): Promise<void> {
   try {
-    if (!response.url().endsWith(GRAPHQL_URL_SUFFIX)) return;
+    const url = response.url();
+    if (!url.endsWith(GRAPHQL_URL_SUFFIX) && !url.includes("/api/graphql")) return;
     const body = await response.text();
-    if (!body.includes('"post_id"') || !body.includes("creation_time")) return;
+    if (!body || body.length < 10) return;
+    if (!body.startsWith("{") && !body.includes('"data"') && !body.includes('"node"') && !body.includes('"post_id"')) {
+      return;
+    }
 
     const ids = new Set<string>();
     for (const match of body.matchAll(POST_ID_RE)) {
       const id = match[1];
       if (id !== undefined) ids.add(id);
     }
-    if (ids.size === 0) return;
-    let hasNew = false;
-    for (const id of ids) {
-      if (!seenIds.has(id)) {
-        hasNew = true;
-        break;
-      }
-    }
-    if (!hasNew) return;
     for (const id of ids) seenIds.add(id);
     payloads.push(body);
   } catch {
@@ -284,6 +280,17 @@ export async function captureFeed(
   const scrollDelayMs = opts.scrollDelayMs ?? SCROLL_DELAY_MS;
   const shouldAbort = opts.shouldAbort ?? (() => false);
 
+  // Attach response listener BEFORE navigation so initial GraphQL feed loads are captured
+  const graphqlPayloads: string[] = [];
+  const graphqlPostIds = new Set<string>();
+  const pendingReads = new Set<Promise<void>>();
+
+  page.on("response", (response) => {
+    const promise = collectFeedResponse(response, graphqlPayloads, graphqlPostIds);
+    pendingReads.add(promise);
+    void promise.finally(() => pendingReads.delete(promise));
+  });
+
   // Navigate (parity: goto domcontentloaded, 30s) + settle.
   await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForTimeout(3000);
@@ -305,28 +312,36 @@ export async function captureFeed(
     // non-fatal: some pages have no timeline tab
   }
 
-  // Comet feed loads the next batch of stories via POST /api/graphql/; capture
-  // those payloads and embed them into the returned snapshot (parity:1171).
-  const graphqlPayloads: string[] = [];
-  const graphqlPostIds = new Set<string>();
-  page.on("response", (response) => {
-    void collectFeedResponse(response, graphqlPayloads, graphqlPostIds);
-  });
-
   const domPool: string[] = [];
   const domSeen = new Set<string>();
   const scriptPool: string[] = [];
   const scriptSeen = new Set<string>();
   let staleRounds = 0;
   let postsFoundTotal = 0;
+  let stopReason = "EXHAUSTED";
 
   for (let round = 0; round < scrollRounds; round++) {
-    if (shouldAbort()) break;
+    if (shouldAbort()) {
+      stopReason = "ABORT_REQUESTED";
+      break;
+    }
 
     const gqlBefore = graphqlPostIds.size;
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
+    const gqlPayloadsBefore = graphqlPayloads.length;
+    try {
+      await page.evaluate(() => {
+        const feed = document.querySelector('[role="feed"], [data-pagelet*="Feed"], div[data-key="feed"]') as any;
+        if (feed && feed.lastElementChild) {
+          feed.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          window.scrollBy(0, 1000);
+        }
+      });
+      await page.waitForTimeout(400);
+      await page.evaluate(() => window.scrollBy(0, 600));
+    } catch {
+      // non-fatal scroll evaluation
+    }
     await page.waitForTimeout(scrollDelayMs);
 
     let freshNew = 0;
@@ -364,25 +379,33 @@ export async function captureFeed(
       freshNew += 1;
     }
 
-    // Patience policy (parity:1240-1258): an unreachable Comet feed means the
-    // only posts come from rendered DOM, so keep scrolling longer; when the
-    // feed is alive but below target, Facebook sometimes resumes after a pause.
     const current = domPool.length + scriptPool.length + graphqlPostIds.size;
     const deficit = Math.max(0, (maxPosts || 9999) - current);
-    const staleLimit =
-      graphqlPostIds.size > 0
-        ? Math.max(3, Math.min(Math.floor(deficit / 3), 12))
-        : 6;
+    const staleLimit = maxPosts ? Math.max(8, Math.min(deficit, 16)) : 10;
 
-    if (freshNew === 0 && graphqlPostIds.size === gqlBefore) {
+    const gqlNewIds = graphqlPostIds.size - gqlBefore;
+    const gqlNewPayloads = graphqlPayloads.length - gqlPayloadsBefore;
+
+    if (freshNew === 0 && gqlNewIds === 0 && gqlNewPayloads === 0) {
       staleRounds += 1;
-      if (staleRounds >= staleLimit) break;
+      if (staleRounds >= staleLimit) {
+        stopReason = "STALE_LIMIT_REACHED";
+        break;
+      }
     } else {
       staleRounds = 0;
       postsFoundTotal = Math.max(postsFoundTotal, current);
     }
 
-    if (maxPosts && domPool.length + graphqlPostIds.size >= maxPosts) break;
+    if (maxPosts && domPool.length + graphqlPostIds.size >= maxPosts) {
+      stopReason = "MAX_POSTS_REACHED";
+      break;
+    }
+  }
+
+  // Drain any remaining in-flight GraphQL response body read promises
+  if (pendingReads.size > 0) {
+    await Promise.all(Array.from(pendingReads));
   }
 
   const gqlBlocks = graphqlPayloads
@@ -392,8 +415,6 @@ export async function captureFeed(
     )
     .join("");
 
-  // Marker: the Comet feed (graphql blocks carry the real timeline) never
-  // loaded — a DOM-only snapshot means a partial/walled view (parity:1303).
   const feedMarker =
     graphqlPayloads.length === 0
       ? "<!-- fb-scrape-feed-missing -->"
@@ -406,7 +427,6 @@ export async function captureFeed(
     finalDom = "";
   }
 
-  // Byte-parity assembly (parity:1312-1320).
   const html =
     "<html><body>" +
     domPool.join("") +
@@ -430,6 +450,7 @@ export async function captureFeed(
       loginWall,
       feedMissing: graphqlPayloads.length === 0,
       postsFound: postsFoundTotal,
+      stopReason: loginWall ? "LOGIN_WALL_DETECTED" : stopReason,
     },
   };
 }

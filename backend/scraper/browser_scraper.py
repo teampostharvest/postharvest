@@ -1131,6 +1131,41 @@ def fetch_with_browser(
 
         page.route("**/*", route_handler)
 
+        graphql_payloads: List[str] = []
+        graphql_post_ids: set = set()
+        boundary_metrics: Dict[str, int] = {
+            "responses_received": 0,
+            "graphql_responses": 0,
+            "responses_retained": 0,
+            "graphql_post_ids_discovered": 0,
+        }
+
+        def _on_response(response):
+            try:
+                boundary_metrics["responses_received"] += 1
+                url_str = response.url
+                if not url_str.endswith("/api/graphql/") and "/api/graphql" not in url_str:
+                    return
+                boundary_metrics["graphql_responses"] += 1
+                body = response.text()
+            except Exception:
+                return
+
+            if not body or len(body) < 10:
+                return
+            # Retain all JSON GraphQL payloads (they carry data, nodes, or post_id fragments)
+            if not (body.startswith("{") or '"data"' in body or '"node"' in body or '"post_id"' in body):
+                return
+
+            new_ids = set(re.findall(r'"post_id"\s*:\s*"(\d+)"', body))
+            graphql_post_ids.update(new_ids)
+            boundary_metrics["graphql_post_ids_discovered"] = len(graphql_post_ids)
+            boundary_metrics["responses_retained"] += 1
+            graphql_payloads.append(body)
+
+        # Attach response listener BEFORE page.goto() so initial feed responses are never missed
+        page.on("response", _on_response)
+
         try:
             logger.info("Browser: navigating to %s", url)
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -1193,44 +1228,41 @@ def fetch_with_browser(
                     text.encode("utf-8", "surrogatepass")
                 ).hexdigest()[:24]
 
-            # Facebook's Comet feed loads the next batch of stories via
-            # POST /api/graphql/ responses, not new DOM in the page.  Capture
-            # those payloads (they carry full post IDs, timestamps, texts and
-            # engagement counts) and embed them into the returned snapshot.
-            graphql_payloads: List[str] = []
-            graphql_post_ids: set = set()
-
-            def _on_response(response):
-                try:
-                    if not response.url.endswith("/api/graphql/"):
-                        return
-                    body = response.text()
-                except Exception:
-                    return
-                if '"post_id"' not in body or "creation_time" not in body:
-                    return
-                new_ids = set(
-                    re.findall(r'"post_id"\s*:\s*"(\d+)"', body)
-                )
-                if not new_ids - graphql_post_ids:
-                    return
-                graphql_post_ids.update(new_ids)
-                graphql_payloads.append(body)
-
-            page.on("response", _on_response)
-
             dom_pool: List[str] = []
             dom_seen: set = set()
             script_pool: List[str] = []
             script_seen: set = set()
             stale_rounds = 0
+            stop_reason = "EXHAUSTED"
+            frame_telemetry: List[Dict[str, Any]] = []
 
             for i in range(scroll_rounds):
                 if cancel_event and cancel_event.is_set():
+                    stop_reason = "ABORT_REQUESTED"
                     break
 
                 gql_before = len(graphql_post_ids)
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                gql_payloads_before = len(graphql_payloads)
+
+                # Evidence-driven feed sentinel scroll: scrolling feed.lastElementChild
+                # into view keeps Comet's IntersectionObserver active inside the viewport,
+                # preventing the browser from scrolling past the feed into the footer.
+                try:
+                    page.evaluate("""
+                        () => {
+                            const feed = document.querySelector('[role="feed"], [data-pagelet*="Feed"], div[data-key="feed"]');
+                            if (feed && feed.lastElementChild) {
+                                feed.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            } else {
+                                window.scrollBy(0, 1000);
+                            }
+                        }
+                    """)
+                    page.wait_for_timeout(400)
+                    page.evaluate("window.scrollBy(0, 600)")
+                except Exception:
+                    pass
+
                 page.wait_for_timeout(int(SCROLL_DELAY * 1000))
 
                 soup = BeautifulSoup(page.content(), "lxml")
@@ -1266,24 +1298,40 @@ def fetch_with_browser(
                         script_pool.append(str(tag))
                         fresh_new += 1
 
-                # When the Comet feed is unreachable (login wall), the only
-                # posts come from the rendered DOM; keep scrolling longer
-                # instead of giving up after only 3 quiet rounds.
-                # When graphql is present but we're still below the target,
-                # be more patient — Facebook sometimes resumes after a pause.
                 current = len(dom_pool) + len(script_pool) + len(graphql_post_ids)
-                if graphql_post_ids:
-                    deficit = max(0, (max_posts or 9999) - current)
-                    stale_limit = max(3, min(deficit // 3, 12))
+                gql_new_ids = len(graphql_post_ids) - gql_before
+                gql_new_payloads = len(graphql_payloads) - gql_payloads_before
+
+                # Record frame-level telemetry
+                frame_info = {
+                    "round": i + 1,
+                    "graphql_payloads": len(graphql_payloads),
+                    "graphql_post_ids": len(graphql_post_ids),
+                    "dom_roots": len(dom_pool),
+                    "script_blobs": len(script_pool),
+                    "fresh_new_dom_script": fresh_new,
+                    "new_graphql_ids": gql_new_ids,
+                    "current_total": current,
+                }
+                frame_telemetry.append(frame_info)
+
+                # Patience policy: adapt stale limits dynamically
+                if max_posts:
+                    deficit = max(0, max_posts - current)
+                    stale_limit = max(8, min(deficit, 16))
                 else:
-                    stale_limit = 6
-                if fresh_new == 0 and len(graphql_post_ids) == gql_before:
+                    stale_limit = 10
+
+                # Progress check: reset stale counter if new DOM roots, script blobs,
+                # or GraphQL payload IDs were discovered
+                if fresh_new == 0 and gql_new_ids == 0 and gql_new_payloads == 0:
                     stale_rounds += 1
                     if stale_rounds >= stale_limit:
                         logger.info(
-                            "Browser: no new posts after %d scrolls, stopping",
-                            stale_rounds,
+                            "Browser: no new posts after %d scrolls (stale limit %d), stopping",
+                            stale_rounds, stale_limit,
                         )
+                        stop_reason = "STALE_LIMIT_REACHED"
                         break
                 else:
                     stale_rounds = 0
@@ -1291,27 +1339,21 @@ def fetch_with_browser(
                         "Browser: scroll %d - %d posts accumulated "
                         "(%d DOM, %d script, %d graphql responses, %d post_ids)",
                         i + 1,
-                        len(dom_pool) + len(script_pool) + len(graphql_post_ids),
+                        current,
                         len(dom_pool),
                         len(script_pool),
                         len(graphql_payloads),
                         len(graphql_post_ids),
                     )
-                    _report(
-                        len(dom_pool) + len(script_pool) + len(graphql_post_ids)
-                    )
-                    posts_found_total = max(
-                        posts_found_total,
-                        len(dom_pool) + len(script_pool) + len(graphql_post_ids),
-                    )
+                    _report(current)
+                    posts_found_total = max(posts_found_total, current)
 
-                if max_posts is not None and (
-                    len(dom_pool) + len(graphql_post_ids) >= max_posts
-                ):
+                if max_posts is not None and (len(dom_pool) + len(graphql_post_ids) >= max_posts):
                     logger.info(
                         "Browser: reached %d posts (target: %d)",
                         len(dom_pool) + len(graphql_post_ids), max_posts,
                     )
+                    stop_reason = "MAX_POSTS_REACHED"
                     break
 
             gql_blocks = "".join(
@@ -1362,6 +1404,9 @@ def fetch_with_browser(
     return html_result, {
         "login_wall": login_wall_detected,
         "posts_found": posts_found_total,
+        "stop_reason": "LOGIN_WALL_DETECTED" if login_wall_detected else stop_reason,
+        "telemetry": frame_telemetry,
+        "boundary_metrics": boundary_metrics,
     }
 
 
@@ -1758,31 +1803,69 @@ def scrape_source_browser(
     )
     kept = [p for p in kept if _passes_filters(p, filters)]
 
-    if max_posts is not None and len(kept) > max_posts:
-        kept = kept[:max_posts]
+    posts_requested = max_posts if max_posts is not None else 0
+    posts_extracted = len(kept)
+    posts_discovered = len(page.posts)
+    coverage_ratio = (
+        round(posts_extracted / posts_requested, 3)
+        if posts_requested > 0
+        else 1.0
+    )
+    stop_reason = stats.get("stop_reason") or (
+        "MAX_POSTS_REACHED"
+        if posts_requested > 0 and posts_extracted >= posts_requested
+        else "EXHAUSTED"
+    )
+    is_partial = (
+        posts_requested > 0
+        and posts_extracted < posts_requested
+        and stop_reason not in ("MAX_POSTS_REACHED", "EXHAUSTED")
+    )
+    completeness_status = "PARTIAL" if is_partial else "FULL"
+
+    all_errors = [dict(e) for e in page.post_errors] + errors
+    if completeness_status == "PARTIAL" and not any(e.get("code") == "partial_feed" for e in all_errors):
+        all_errors.append({
+            "url": url,
+            "code": "partial_feed",
+            "message": f"Partial feed extractions ({posts_extracted}/{posts_requested} posts extracted). Stop reason: {stop_reason}",
+        })
 
     if progress_callback:
         try:
             progress_callback(
-                posts_found=len(page.posts),
-                posts_extracted=len(kept),
+                posts_found=posts_discovered,
+                posts_extracted=posts_extracted,
                 duplicates_removed=duplicates,
-                posts_failed=len(page.post_errors) + len(errors),
+                posts_failed=len(all_errors),
             )
         except Exception:
             pass
 
+    bm = stats.get("boundary_metrics") or {}
     return SourceResult(
         url=url,
         page_name=page.page_name,
         page_id=page.page_id,
         posts=kept,
         stats={
-            "posts_discovered": len(page.posts),
-            "posts_extracted": len(kept),
+            "posts_requested": posts_requested,
+            "posts_discovered": posts_discovered,
+            "posts_extracted": posts_extracted,
+            "coverage_ratio": coverage_ratio,
+            "stop_reason": stop_reason,
+            "completeness_status": completeness_status,
             "duplicates_removed": duplicates,
             "posts_skipped": 0,
-            "posts_failed": len(page.post_errors) + len(errors),
+            "posts_failed": len(all_errors),
+            "boundary_metrics": {
+                "responses_received": bm.get("responses_received", 0),
+                "graphql_responses": bm.get("graphql_responses", 0),
+                "responses_retained": bm.get("responses_retained", 0),
+                "graphql_post_ids_discovered": bm.get("graphql_post_ids_discovered", 0),
+                "posts_discovered": posts_discovered,
+                "posts_extracted": posts_extracted,
+            },
         },
-        errors=[dict(e) for e in page.post_errors] + errors,
+        errors=all_errors,
     )
