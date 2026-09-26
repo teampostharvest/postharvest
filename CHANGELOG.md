@@ -1,3 +1,43 @@
+## [1.5.3](https://github.com/teampostharvest/postharvest/compare/v1.5.2...v1.5.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* **obs:** keep Grafana alerting provisioning valid when webhook URL is unset ([14985bd](https://github.com/teampostharvest/postharvest/commit/14985bde666fbe291db00eef72d68b0ac00dbe1f))
+
+## [1.5.2](https://github.com/teampostharvest/postharvest/compare/v1.5.1...v1.5.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **obs:** flat alerting provisioning layout + cadvisor healthcheck URL ([a1fca4f](https://github.com/teampostharvest/postharvest/commit/a1fca4f0640a83ad65e05af732f130ef599a5d6f))
+
+## [1.5.1](https://github.com/teampostharvest/postharvest/compare/v1.5.0...v1.5.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **obs:** use canonical oliver006/redis_exporter image for the redis metrics exporter ([ff69c0c](https://github.com/teampostharvest/postharvest/commit/ff69c0c0d1f3b81bb04c334d3b23d6d41067932a))
+
+# [1.5.0](https://github.com/teampostharvest/postharvest/compare/v1.4.0...v1.5.0) (2026-09-24)
+
+
+### Features
+
+* **obs:** monitoring platform — prometheus, grafana, exporters, dashboards, alerting (D13–D17) ([da4f852](https://github.com/teampostharvest/postharvest/commit/da4f852556c7dce00b6f74273dd33575d86dd200))
+
+# [1.4.0](https://github.com/teampostharvest/postharvest/compare/v1.3.0...v1.4.0) (2026-09-24)
+
+
+### Bug Fixes
+
+* **capture:** push-stream viewer + session seeding so live capture completes fast ([c15139c](https://github.com/teampostharvest/postharvest/commit/c15139ca3f2594adf6e269b29e0442fc929db184))
+
+
+### Features
+
+* **obs:** metrics endpoints on backend, go and node (observability, part 1) ([480c57f](https://github.com/teampostharvest/postharvest/commit/480c57f0f6a76dd4401a21989991fa20ea5f178a))
+
 # [1.3.0](https://github.com/teampostharvest/postharvest/compare/v1.2.0...v1.3.0) (2026-09-24)
 
 

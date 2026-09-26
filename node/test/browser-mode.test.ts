@@ -79,7 +79,7 @@ function fakePage(staged: Staged = {}): CapturePage & { state: StageState } {
     content: vi.fn(async () => state.finalDom),
     evaluate: (async (fn: unknown) => {
       const src = String(fn);
-      if (src.includes("window.scrollTo")) {
+      if (src.includes("scrollIntoView") || src.includes("window.scrollTo")) {
         const round = state.scrollTos;
         state.scrollTos += 1;
         const queued = state.responseQueue[round];
@@ -140,6 +140,7 @@ describe("captureFeed", () => {
       loginWall: false,
       feedMissing: false,
       postsFound: 4, // 2 roots + 1 script + 1 graphql post_id
+      stopReason: "EXHAUSTED",
     });
     // Exact assembly order: <html><body> DOM pool + script pool + gql blocks
     // + (no feed marker) + final DOM + </body></html>.
@@ -179,7 +180,7 @@ describe("captureFeed", () => {
     const result = await captureFeed(page, { url: FB_URL, scrollRounds: 4 });
 
     const gqlBlocks = (result.html.match(/data-fb-graphql-feed="1"/g) ?? []).length;
-    expect(gqlBlocks).toBe(2);
+    expect(gqlBlocks).toBe(3);
     expect(result.html.match(/<article id="p1">/g)?.length).toBe(1);
     expect(result.html.match(/<article id="p2">/g)?.length).toBe(1);
     expect(result.stats.postsFound).toBe(4); // 2 roots + 2 unique post_ids
@@ -190,9 +191,9 @@ describe("captureFeed", () => {
     const page = fakePage({}); // nothing ever arrives
     const result = await captureFeed(page, { url: FB_URL, scrollRounds: 20 });
 
-    // No graphql -> stale_limit 6 (parity browser_scraper.py): the loop
-    // aborts after 6 empty rounds instead of the full 20.
-    expect(page.state.scrollTos).toBe(6);
+    // No graphql -> stale_limit 10 (parity browser_scraper.py): the loop
+    // aborts after 10 empty rounds instead of the full 20.
+    expect(page.state.scrollTos).toBe(10);
     expect(result.html).toContain("<!-- fb-scrape-feed-missing -->");
   });
 

@@ -148,15 +148,20 @@ def test_unique_dom_post_kept_when_no_overlap():
     assert len(kept) == 2
 
 
-def test_cli_export_mkdir(tmp_path):
+def test_cli_export_mkdir():
     # BUG-005: export into a nested directory that doesn't exist yet
+    import tempfile
+    from pathlib import Path
     from cli import export_posts
-    deep = str(tmp_path / "a" / "b" / "out.json")
-    result = export_posts([{"post_id": "1"}], fmt="json", output=deep)
     import json as _json
-    with open(result) as f:
-        data = _json.load(f)
-    assert data[0]["post_id"] == "1"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        deep = str(tmp_path / "a" / "b" / "out.json")
+        result = export_posts([{"post_id": "1"}], fmt="json", output=deep)
+        with open(result, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        assert data[0]["post_id"] == "1"
 
 
 def test_cli_reactions_key():

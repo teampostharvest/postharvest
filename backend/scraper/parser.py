@@ -760,7 +760,48 @@ def _iter_json_objects(text: str):
         i = end
 
 
-def _timeline_story_nodes(tl) -> List[dict]:
+def _is_valid_story_candidate(candidate: Any) -> bool:
+    """Layer 3 - Multi-signal Story Validation.
+
+    Validates candidate dicts to ensure they are true Facebook post/story nodes
+    (not generic JSON blobs or metadata) before normalization.
+    Signals checked:
+    - Has `post_id` (non-empty string or int)
+    - OR `__typename` is 'Story' or 'CometStory'
+    - AND has at least one secondary signal: `creation_time`, `comet_sections`,
+      `feedback`, `message`, `attachments`, `actors`, or `permalink_url`.
+    """
+    if not isinstance(candidate, dict):
+        return False
+    post_id = candidate.get("post_id")
+    typename = candidate.get("__typename") or ""
+
+    if typename in ("Story", "CometStory") and post_id:
+        return True
+
+    if not post_id:
+        return False
+
+    # Secondary story signals:
+    has_creation_time = "creation_time" in candidate or "publish_time" in candidate
+    has_comet_sections = "comet_sections" in candidate
+    has_feedback = "feedback" in candidate
+    has_message = "message" in candidate or "text" in candidate
+    has_attachments = "attachments" in candidate
+    has_permalink = "permalink_url" in candidate or "url" in candidate
+
+    signals_count = sum([
+        has_creation_time,
+        has_comet_sections,
+        has_feedback,
+        has_message,
+        has_attachments,
+        has_permalink,
+    ])
+    return signals_count >= 1
+
+
+def _timeline_story_nodes(tl: Any) -> List[dict]:
     """Flatten ``{edges: [{node: Story}]}`` (or a Story node itself) into dicts."""
     found: List[dict] = []
     if not isinstance(tl, dict):
@@ -775,33 +816,90 @@ def _timeline_story_nodes(tl) -> List[dict]:
     return found
 
 
-def _graphql_story_nodes(payload) -> List[dict]:
-    """Flatten ``/api/graphql/`` response objects into candidate story dicts.
+def _graphql_story_nodes(payload: Any) -> List[dict]:
+    """Layered GraphQL story extraction pipeline.
 
-    Looks for ``data.node`` entries of ``__typename`` ``Story`` plus the
-    timeline edge lists under both ``data.node.timeline_list_feed_units``
-    (browser-snapshot shape) and ``data.user.timeline_list_feed_units``
-    (guest feed-walk shape — the walk's GraphQL frames carry their story
-    nodes under ``data.user`` on the first query document).
+    - Layer 1 (Known Fast Paths): Check `data.node.timeline_list_feed_units`,
+      `data.user.timeline_feed_units`, `data.page.timeline_feed_units`,
+      `data.node.timeline_feed_units`, `data.viewer.news_feed`, etc.
+    - Layer 2 (Connection Discovery): Recursively traverse objects looking for
+      `edges[].node` and `page_info` connection nodes.
+    - Layer 3 (Story Validation Engine): Validate candidates with multi-signal
+      checking (`_is_valid_story_candidate`).
     """
-    if not isinstance(payload, dict):
+    if not isinstance(payload, (dict, list)):
         return []
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        return []
+
     found: List[dict] = []
-    node = data.get("node")
-    if isinstance(node, dict):
-        if node.get("__typename") == "Story" and node.get("post_id"):
-            found.append(node)
-        found.extend(_timeline_story_nodes(node.get("timeline_list_feed_units")))
-    user = data.get("user")
-    if isinstance(user, dict):
-        found.extend(_timeline_story_nodes(user.get("timeline_list_feed_units")))
+    seen_ids: set = set()
+
+    def _add(candidate: dict) -> None:
+        if _is_valid_story_candidate(candidate):
+            pid = str(candidate.get("post_id") or "").strip()
+            if pid and pid not in seen_ids:
+                seen_ids.add(pid)
+                found.append(candidate)
+
+    # --- Layer 1: Known Fast Paths ---
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, dict):
+            # 1a. Direct node Story
+            node = data.get("node")
+            if isinstance(node, dict):
+                _add(node)
+                # Known timeline_feed_units / timeline_list_feed_units
+                for feed_key in ("timeline_list_feed_units", "timeline_feed_units", "timeline_contents", "group_feed"):
+                    tl = node.get(feed_key)
+                    if isinstance(tl, dict):
+                        for edge in tl.get("edges") or []:
+                            child = edge.get("node") if isinstance(edge, dict) else None
+                            if isinstance(child, dict):
+                                _add(child)
+
+            # 1b. Direct user / page / viewer timeline feed units
+            for entity_key in ("user", "page", "viewer", "group"):
+                entity = data.get(entity_key)
+                if isinstance(entity, dict):
+                    for feed_key in ("timeline_feed_units", "timeline_list_feed_units", "news_feed", "group_feed"):
+                        tl = entity.get(feed_key)
+                        if isinstance(tl, dict):
+                            for edge in tl.get("edges") or []:
+                                child = edge.get("node") if isinstance(edge, dict) else None
+                                if isinstance(child, dict):
+                                    _add(child)
+
+    # Fast path yield if items found
+    if found:
+        return found
+
+    # --- Layer 2: Connection Discovery (Recursive fallback for new/unknown shapes) ---
+    def _walk(obj: Any, depth: int = 0) -> None:
+        if depth > 20:
+            return
+        if isinstance(obj, dict):
+            if _is_valid_story_candidate(obj):
+                _add(obj)
+            edges = obj.get("edges")
+            if isinstance(edges, list):
+                for edge in edges:
+                    if isinstance(edge, dict):
+                        child = edge.get("node")
+                        if isinstance(child, dict):
+                            _add(child)
+                            _walk(child, depth + 1)
+            for k, v in obj.items():
+                if isinstance(v, (dict, list)) and k not in ("feedback", "comet_sections", "attachments"):
+                    _walk(v, depth + 1)
+        elif isinstance(obj, list):
+            for item in obj:
+                _walk(item, depth + 1)
+
+    _walk(payload)
     return found
 
 
-def _graphql_page_info(payload) -> Optional[dict]:
+def _graphql_page_info(payload: Any) -> Optional[dict]:
     """Extract ``data.page_info`` (the pagination cursor batch) if present.
 
     The feed walk's GraphQL responses end with a tail document whose
@@ -892,7 +990,6 @@ def extract_posts_from_graphql(html: str, page_url: str) -> List[ParsedPost]:
                 if post and (post.post_id or post.text):
                     posts.append(post)
     return posts
-
 
 def _graphql_story_to_post(story: dict, page_url: str) -> Optional[ParsedPost]:
     """Build a :class:`ParsedPost` from one Comet feed story node."""
