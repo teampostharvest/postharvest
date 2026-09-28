@@ -33,7 +33,7 @@ playwright==1.62.0
 
 # --- PostgreSQL driver & database migrations ---------------------------------
 # DATABASE_URL / SUPABASE_DB_URL is set by docker-compose or environment.
-psycopg[binary]==3.3.5
+psycopg[binary]==3.3.6
 alembic>=1.13,<2
 
 # --- Firebase Authentication ------------------------------------------------
