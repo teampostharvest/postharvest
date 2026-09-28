@@ -49,5 +49,5 @@ cryptography==50.0.1
 # arq: Redis-backed job queue abstraction replacing the in-process
 # ThreadPoolExecutor (wired in the arq worker slice; listed now per the plan's
 # tool index so the dependency graph is complete for the backend image).
-redis==5.3.1
+redis==8.1.0
 arq==0.28.0
