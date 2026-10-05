@@ -6,7 +6,7 @@
 # layer (backend/scraper) but the application needs them at runtime, so they
 # are listed here as well. Keep the pinned set minimal and compatible.
 
-fastapi==0.141.1
+fastapi==0.142.2
 uvicorn==0.52.4
 # WebSocket runtime for the session-capture CDP bridge (uvicorn without
 # [standard] bundles no websocket implementation).
