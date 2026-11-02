@@ -4,7 +4,7 @@
 #   python -m pip install --user -r tests/requirements.txt
 #   python -m pytest tests/ -v
 
-pytest>=9.1.1
+pytest>=9.2.0
 
 # fakeredis: hermetic Redis client for the job-state tests — implements the
 # same client API in-process, so the suite never opens a network connection.
